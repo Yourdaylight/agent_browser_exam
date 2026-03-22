@@ -473,6 +473,41 @@ async def register(request: Request, data: RegisterRequest):
     # 注册不需要 API Key，只检查 IP 频率限制
     ip = get_client_ip(request)
 
+    # 构建设备指纹：IP + User-Agent + Agent名称
+    user_agent = request.headers.get("user-agent", "")
+    fingerprint = f"{ip}|{user_agent}|{data.claw_name}|{data.exam_id}"
+
+    # 检查是否已有未完成的会话（同一设备同级别）
+    existing = _get_db().get_session_by_fingerprint(fingerprint, data.exam_id)
+    if existing:
+        # 返回已有会话的下一题
+        next_task = None
+        for i, t in enumerate(existing.tasks):
+            if t["id"] not in existing.results:
+                next_task = t
+                existing.current_task_index = i
+                _get_db().save_session(existing)
+                break
+        return {
+            "exam_token": existing.exam_token,
+            "total_questions": len(existing.tasks),
+            "total_score": sum(t["max_score"] for t in existing.tasks),
+            "first_question": None,
+            "next_question": next_task,
+            "resumed": True,
+            "progress": {
+                "completed": len(existing.results),
+                "total": len(existing.tasks)
+            },
+            "exam_id": data.exam_id,
+            "expires_in_minutes": existing.timeout_minutes,
+            "resume_hint": (
+                f"[恢复已有会话] 你已有未完成的考试，准考证号: {existing.exam_token}\n"
+                f"已完成 {len(existing.results)}/{len(existing.tasks)} 题，继续答题即可。\n"
+                f"如对话再次中断，用 GET /api/next/{existing.exam_token} 继续答题。"
+            ),
+        }
+
     # 检查 IP 频率限制（注册接口单独限制：每分钟 10 次）
     allowed, remaining = security_manager.check_rate_limit(f"register:{ip}", 10)
     if not allowed:
@@ -539,6 +574,7 @@ async def register(request: Request, data: RegisterRequest):
         tasks=tasks,
         current_task_index=0,
         timeout_minutes=timeout_minutes,
+        device_fingerprint=fingerprint,
     )
 
     _get_db().save_session(session)

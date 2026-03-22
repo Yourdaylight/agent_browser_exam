@@ -94,6 +94,7 @@ class ExamSession(BaseModel):
     current_task_index: int = 0
     completed: bool = False
     timeout_minutes: int = 30
+    device_fingerprint: str = ""
 
 
 class ExamScore(BaseModel):

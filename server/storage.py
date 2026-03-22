@@ -67,15 +67,24 @@ class Storage:
 
             CREATE INDEX IF NOT EXISTS idx_leaderboard_level ON leaderboard(level);
             CREATE INDEX IF NOT EXISTS idx_sessions_created ON exam_sessions(created_at);
+            CREATE INDEX IF NOT EXISTS idx_sessions_fingerprint ON exam_sessions(device_fingerprint);
         """)
+
+        # 兼容迁移：为旧表添加 device_fingerprint 列
+        try:
+            self._get_conn().execute(
+                "ALTER TABLE exam_sessions ADD COLUMN device_fingerprint TEXT DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass  # 列已存在
 
     # ---- Exam Session ----
 
     def save_session(self, session: ExamSession):
         conn = self._get_conn()
         conn.execute(
-            "INSERT OR REPLACE INTO exam_sessions (exam_token, data) VALUES (?, ?)",
-            (session.exam_token, session.model_dump_json()),
+            "INSERT OR REPLACE INTO exam_sessions (exam_token, data, device_fingerprint) VALUES (?, ?, ?)",
+            (session.exam_token, session.model_dump_json(), session.device_fingerprint),
         )
 
     def get_session(self, exam_token: str) -> Optional[ExamSession]:
@@ -86,6 +95,23 @@ class Storage:
         ).fetchone()
         if row:
             return ExamSession.model_validate_json(row["data"])
+        return None
+
+    def get_session_by_fingerprint(self, fingerprint: str, exam_id: str) -> Optional[ExamSession]:
+        """按设备指纹 + 考试级别查找未过期的活跃会话"""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT data FROM exam_sessions WHERE device_fingerprint = ?",
+            (fingerprint,),
+        ).fetchall()
+        for row in rows:
+            try:
+                session = ExamSession.model_validate_json(row["data"])
+                if session.exam_id.value == exam_id and not session.completed:
+                    if datetime.now() - session.started_at <= timedelta(minutes=session.timeout_minutes):
+                        return session
+            except Exception:
+                pass
         return None
 
     def delete_session(self, exam_token: str):
