@@ -706,10 +706,10 @@ class OnDemandSnapshotValidator(BrowserActionValidator):
 # ============================================
 
 class ControlHandoverValidator(BrowserActionValidator):
-    """L3-1: 控制权切换验证器"""
+    """L3-3: 控制权切换验证器"""
 
-    def __init__(self):
-        super().__init__(max_score=15)
+    def __init__(self, max_score: int = 25):
+        super().__init__(max_score=max_score)
 
     async def validate(
         self,
@@ -718,7 +718,7 @@ class ControlHandoverValidator(BrowserActionValidator):
     ) -> ValidationResult:
         if not execution_log:
             return ValidationResult(
-                correct=False, score=0, max_score=15,
+                correct=False, score=0, max_score=self.max_score,
                 feedback="缺少执行日志"
             )
 
@@ -741,7 +741,8 @@ class ControlHandoverValidator(BrowserActionValidator):
         )
 
         correct = (handover_idx is not None and resume_idx is not None)
-        score = 15 if correct else (8 if handover_idx is not None else 0)
+        partial_score = int(self.max_score * 0.5)
+        score = self.max_score if correct else (partial_score if handover_idx is not None else 0)
 
         if correct:
             feedback = "控制权切换序列完整：handover -> resume"
@@ -753,7 +754,7 @@ class ControlHandoverValidator(BrowserActionValidator):
         return ValidationResult(
             correct=correct,
             score=score,
-            max_score=15,
+            max_score=self.max_score,
             feedback=feedback,
             details={
                 "handover_detected": handover_idx is not None,
@@ -763,16 +764,16 @@ class ControlHandoverValidator(BrowserActionValidator):
         )
 
     def get_score(self) -> Tuple[int, int]:
-        return (15, 15)
+        return (self.max_score, self.max_score)
 
 
 class SearchValidator(BrowserActionValidator):
-    """L3-2: 搜索验证器"""
+    """L3-1: 搜索验证器"""
 
-    def __init__(self, search_url: str, expected_keyword: str):
+    def __init__(self, search_url: str, expected_keyword: str, max_score: int = 20):
         super().__init__(
             url_pattern=r"baidu\.com",
-            max_score=15
+            max_score=max_score
         )
         self.search_url = search_url
         self.expected_keyword = expected_keyword
@@ -784,7 +785,7 @@ class SearchValidator(BrowserActionValidator):
     ) -> ValidationResult:
         if not execution_log:
             return ValidationResult(
-                correct=False, score=0, max_score=15,
+                correct=False, score=0, max_score=self.max_score,
                 feedback="缺少执行日志"
             )
 
@@ -798,12 +799,12 @@ class SearchValidator(BrowserActionValidator):
                        if a.url and self.expected_keyword.lower() in a.url.lower()]
 
         found = len(search_inputs) > 0 or len(search_navs) > 0
-        score = 15 if found else 0
+        score = self.max_score if found else 0
 
         return ValidationResult(
             correct=found,
             score=score,
-            max_score=15,
+            max_score=self.max_score,
             feedback=f"搜索关键词 '{self.expected_keyword}' {'找到' if found else '未找到'}",
             details={
                 "search_inputs": len(search_inputs),
@@ -812,14 +813,14 @@ class SearchValidator(BrowserActionValidator):
         )
 
     def get_score(self) -> Tuple[int, int]:
-        return (15, 15)
+        return (self.max_score, self.max_score)
 
 
 class MultiStepValidator(BrowserActionValidator):
-    """L3-3: 多步操作验证器"""
+    """L3-2: 多步操作验证器"""
 
-    def __init__(self, expected_steps: List[Dict[str, Any]]):
-        super().__init__(max_score=15)
+    def __init__(self, expected_steps: List[Dict[str, Any]], max_score: int = 25):
+        super().__init__(max_score=max_score)
         self.expected_steps = expected_steps
 
     async def validate(
@@ -829,7 +830,7 @@ class MultiStepValidator(BrowserActionValidator):
     ) -> ValidationResult:
         if not execution_log:
             return ValidationResult(
-                correct=False, score=0, max_score=15,
+                correct=False, score=0, max_score=self.max_score,
                 feedback="缺少执行日志"
             )
 
@@ -859,15 +860,18 @@ class MultiStepValidator(BrowserActionValidator):
                 })
 
         ratio = matched_steps / len(self.expected_steps) if self.expected_steps else 0
-        score = int(15 * ratio)
+        score = int(self.max_score * ratio)
 
         return ValidationResult(
             correct=ratio >= 0.8,
             score=score,
-            max_score=15,
+            max_score=self.max_score,
             feedback=f"完成 {matched_steps}/{len(self.expected_steps)} 步",
             details={"step_details": step_details, "ratio": ratio}
         )
+
+    def get_score(self) -> Tuple[int, int]:
+        return (self.max_score, self.max_score)
 
     def _match_action(self, action: Action, expected: Dict[str, Any]) -> bool:
         if action.type != expected.get("type"):
@@ -882,9 +886,6 @@ class MultiStepValidator(BrowserActionValidator):
             if not action.value or expected["value_contains"].lower() not in action.value.lower():
                 return False
         return True
-
-    def get_score(self) -> Tuple[int, int]:
-        return (15, 15)
 
 
 # ============================================

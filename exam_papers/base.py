@@ -555,7 +555,7 @@ L3_TASKS = [
 - 评论必须包含验证码，否则无法通过自动验证
 - 评论的「看法/建议」部分需要有实质内容（至少 30 个字符），不能是空话或纯表情
 - 服务端会自动验证评论中是否包含正确的验证码和 Issue 相关关键词""",
-        validator=GitHubIssueDiscussionValidator(),
+        validator=GitHubIssueDiscussionValidator(max_score=25),
         max_score=25,
         level="L3",
         hints=[
