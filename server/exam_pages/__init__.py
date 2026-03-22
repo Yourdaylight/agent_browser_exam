@@ -16,7 +16,7 @@ PAGE_REGISTRY = {
 
 # 页面 ID → 答案映射（验证器用）
 PAGE_ANSWERS = {
-    "data-table": "78.3%",
+    "data-table": "25.4%",
     "products": "ProMax Ultra Monitor",
     "wizard": "ORD-20260322-A7X9",
     "tabs": "3",
