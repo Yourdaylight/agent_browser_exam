@@ -237,33 +237,33 @@ class BrowserActionValidator(BaseValidator):
 
 class OpenPageAndExtractTitleValidator(BrowserActionValidator):
     """L1-1: 打开网页并提取标题"""
-    def __init__(self):
+    def __init__(self, max_score: int = 20):
         super().__init__(
             url_pattern=r"example\.com",
             validate_action="navigate",
             expected_content="Example Domain",
-            max_score=5
+            max_score=max_score
         )
 
 
 class OpenPageAndScreenshotValidator(BrowserActionValidator):
     """L1-2: 打开网页并截图"""
-    def __init__(self):
+    def __init__(self, max_score: int = 20):
         super().__init__(
             url_pattern=r"example\.com",
             validate_action="screenshot",
-            max_score=5
+            max_score=max_score
         )
 
 
 class ClickElementValidator(BrowserActionValidator):
     """L1-3: 点击页面元素"""
-    def __init__(self, selector_hint: str):
+    def __init__(self, selector_hint: str, max_score: int = 20):
         super().__init__(
             url_pattern=r"example\.com",
             validate_action="click",
             validate_selector=selector_hint,
-            max_score=5
+            max_score=max_score
         )
 
 
