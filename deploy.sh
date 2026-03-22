@@ -102,7 +102,7 @@ server {
     listen 443 ssl;
     server_name browserexam.clawtown.cn;
 
-    ssl_certificate     /etc/nginx/ssl/browserexam.clawtown.cn.crt;
+    ssl_certificate     /etc/nginx/ssl/browserexam.clawtown.cn_bundle.crt;
     ssl_certificate_key /etc/nginx/ssl/browserexam.clawtown.cn.key;
     ssl_protocols       TLSv1.2 TLSv1.3;
 
