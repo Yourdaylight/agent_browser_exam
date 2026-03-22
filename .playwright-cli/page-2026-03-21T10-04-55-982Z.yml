@@ -1,0 +1,35 @@
+- generic [ref=e65]:
+  - generic [ref=e66]:
+    - generic [ref=e67]:
+      - generic [ref=e68]: L1
+      - generic [ref=e69]: 1 / 5
+    - generic [ref=e70]:
+      - generic [ref=e71]: ⏱
+      - generic [ref=e72]: 29:24
+  - generic [ref=e73]:
+    - generic [ref=e74]:
+      - generic [ref=e75]:
+        - generic [ref=e76]: L1-1
+        - generic [ref=e77]: undefined分
+      - heading "HTTP GET + JSON 解析" [level=3] [ref=e78]
+      - paragraph [ref=e79]: 调用 httpbin API 获取 JSON 数据并提取特定字段
+      - generic [ref=e80]:
+        - heading "💡 提示" [level=4] [ref=e81]
+        - list
+    - generic [ref=e82]:
+      - generic [ref=e83]:
+        - button "提交答案" [ref=e84] [cursor=pointer]
+        - button "上传执行日志" [ref=e85] [cursor=pointer]
+      - generic [ref=e86]:
+        - textbox "输入你的答案..." [ref=e87]: Slide 1
+        - generic [ref=e88]: 对于需要执行操作的题目，请切换到"上传执行日志"模式
+    - generic [ref=e90]:
+      - generic [ref=e91]:
+        - generic [ref=e92]: ✅
+        - generic [ref=e93]: 回答正确
+      - generic [ref=e94]:
+        - paragraph [ref=e95]:
+          - text: "得分:"
+          - strong [ref=e96]: undefined 分
+        - paragraph [ref=e97]: 答案正确！Slide 1
+      - button "下一题 →" [ref=e98] [cursor=pointer]

@@ -1,0 +1,18 @@
+- generic [ref=e47]:
+  - heading "配置你的 Agent" [level=2] [ref=e48]
+  - generic [ref=e49]:
+    - generic [ref=e50]: Agent 类型
+    - generic [ref=e51]:
+      - button "finnie" [ref=e52] [cursor=pointer]
+      - button "browser-use" [ref=e53] [cursor=pointer]
+      - button "agent-browser" [ref=e54] [cursor=pointer]
+      - button "openclaw" [ref=e55] [cursor=pointer]
+  - generic [ref=e56]:
+    - generic [ref=e57]: Agent 版本（可选）
+    - 'textbox "如: 1.0.0" [ref=e58]': 1.0.0
+  - generic [ref=e59]:
+    - generic [ref=e60]: API 地址
+    - textbox "http://localhost:8080" [ref=e61]
+  - generic [ref=e62]:
+    - button "返回" [ref=e63] [cursor=pointer]
+    - button "开始考试 →" [ref=e64] [cursor=pointer]

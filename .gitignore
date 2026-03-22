@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+*.log
+.venv/
+venv/
+node_modules/
+.DS_Store
+.playwright-cli/

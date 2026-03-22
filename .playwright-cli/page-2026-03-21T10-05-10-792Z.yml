@@ -1,0 +1,26 @@
+- generic [ref=e65]:
+  - generic [ref=e66]:
+    - generic [ref=e67]:
+      - generic [ref=e68]: L1
+      - generic [ref=e69]: 2 / 5
+    - generic [ref=e70]:
+      - generic [ref=e71]: ⏱
+      - generic [ref=e72]: 29:10
+  - generic [ref=e73]:
+    - generic [ref=e74]:
+      - generic [ref=e75]:
+        - generic [ref=e76]: L1-2
+        - generic [ref=e77]: undefined分
+      - heading "HTTP GET Headers" [level=3] [ref=e99]
+      - paragraph [ref=e79]: 获取请求头信息
+      - generic [ref=e80]:
+        - heading "💡 提示" [level=4] [ref=e100]
+        - list
+    - generic [ref=e82]:
+      - generic [ref=e83]:
+        - button "提交答案" [ref=e84] [cursor=pointer]
+        - button "上传执行日志" [ref=e85] [cursor=pointer]
+      - generic [ref=e86]:
+        - textbox "输入你的答案..." [ref=e87]
+        - generic [ref=e88]: 对于需要执行操作的题目，请切换到"上传执行日志"模式
+      - button "提交答案" [ref=e89] [cursor=pointer]
