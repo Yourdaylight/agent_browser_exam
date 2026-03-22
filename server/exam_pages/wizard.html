@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order Checkout Wizard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:20px;min-height:100vh}
+.container{max-width:600px;margin:0 auto}
+.header{text-align:center;margin-bottom:30px}
+.header h1{font-size:20px;color:#58a6ff}
+.header p{font-size:13px;color:#8b949e;margin-top:4px}
+.steps{display:flex;justify-content:center;gap:8px;margin-bottom:30px}
+.step-dot{width:32px;height:32px;border-radius:50%;background:#21262d;border:2px solid #30363d;display:flex;align-items:center;justify-content:center;font-size:13px;color:#8b949e;transition:all .3s}
+.step-dot.active{background:#1f6feb;border-color:#58a6ff;color:#fff}
+.step-dot.done{background:#238636;border-color:#3fb950;color:#fff}
+.step-line{width:60px;height:2px;background:#30363d;align-self:center;transition:background .3s}
+.step-line.done{background:#3fb950}
+.form-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:24px;display:none}
+.form-card.active{display:block}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:13px;color:#8b949e;margin-bottom:6px}
+.form-group label .required{color:#f85149;margin-left:2px}
+.form-group input,.form-group select,.form-group textarea{width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:8px 12px;font-size:14px;outline:none;transition:border-color .2s}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:#58a6ff}
+.form-group .error-msg{color:#f85149;font-size:12px;margin-top:4px;display:none}
+.form-group.has-error input,.form-group.has-error select{border-color:#f85149}
+.form-group.has-error .error-msg{display:block}
+.btn-row{display:flex;gap:12px;margin-top:24px;justify-content:flex-end}
+.btn{padding:8px 20px;border-radius:4px;font-size:14px;cursor:pointer;border:1px solid #30363d;transition:all .2s}
+.btn-primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
+.btn-primary:hover{background:#388bfd}
+.btn-secondary{background:#21262d;color:#c9d1d9}
+.btn-secondary:hover{background:#30363d}
+.confirm-page{text-align:center;padding:40px 0}
+.confirm-page .order-id{font-size:28px;font-weight:700;color:#3fb950;margin:16px 0;font-family:monospace}
+.confirm-page .details{text-align:left;background:#0d1117;border-radius:6px;padding:16px;margin:20px 0;font-size:13px;line-height:1.8}
+.confirm-page .details strong{color:#e6edf3}
+.preview-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(13,17,23,0.85);z-index:9999;align-items:center;justify-content:center;flex-direction:column}
+.preview-overlay h2{color:#d29922;font-size:18px;margin-bottom:8px}
+.preview-overlay p{color:#8b949e;font-size:14px}
+body.preview-mode .btn{pointer-events:none;opacity:0.5}
+body.preview-mode input,body.preview-mode select{pointer-events:none}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header"><h1>Order Checkout</h1><p>3-step wizard - Complete all required fields to proceed</p></div>
+<div class="steps">
+<div class="step-dot active" id="dot1">1</div><div class="step-line" id="line1"></div>
+<div class="step-dot" id="dot2">2</div><div class="step-line" id="line2"></div>
+<div class="step-dot" id="dot3">3</div>
+</div>
+<!-- Step 1: Shipping -->
+<div class="form-card active" id="step1">
+<h2 style="font-size:16px;margin-bottom:16px;color:#e6edf3">Step 1: Shipping Information</h2>
+<div class="form-group"><label>Full Name <span class="required">*</span></label><input type="text" id="fullName" placeholder="John Doe"><div class="error-msg">Name is required</div></div>
+<div class="form-group"><label>Email Address <span class="required">*</span></label><input type="email" id="email" placeholder="john@example.com"><div class="error-msg">Valid email is required</div></div>
+<div class="form-group"><label>Phone Number <span class="required">*</span></label><input type="tel" id="phone" placeholder="+1 234 567 8900"><div class="error-msg">Phone is required</div></div>
+<div class="form-group"><label>Shipping Address <span class="required">*</span></label><textarea id="address" rows="2" placeholder="123 Main St, City, State, ZIP"></textarea><div class="error-msg">Address is required</div></div>
+<div class="btn-row"><button class="btn btn-primary" onclick="goToStep(2)">Next Step \u2192</button></div>
+</div>
+<!-- Step 2: Payment -->
+<div class="form-card" id="step2">
+<h2 style="font-size:16px;margin-bottom:16px;color:#e6edf3">Step 2: Payment Method</h2>
+<div class="form-group"><label>Payment Method <span class="required">*</span></label>
+<select id="paymentMethod">
+<option value="">-- Select Payment Method --</option>
+<option value="credit_card">Credit Card</option>
+<option value="paypal">PayPal</option>
+<option value="bank_transfer">Bank Transfer</option>
+<option value="crypto">Cryptocurrency</option>
+</select><div class="error-msg">Please select a payment method</div></div>
+<div class="form-group" id="cardFields">
+<label>Card Number</label><input type="text" id="cardNumber" placeholder="4242 4242 4242 4242">
+</div>
+<div class="form-group" id="cardExpiry">
+<label>Expiry Date</label><input type="text" id="expiry" placeholder="MM/YY">
+</div>
+<div class="form-group"><label>Order Notes</label><textarea id="notes" rows="2" placeholder="Special instructions (optional)"></textarea></div>
+<div class="btn-row"><button class="btn btn-secondary" onclick="goToStep(1)">\u2190 Back</button><button class="btn btn-primary" onclick="goToStep(3)">Next Step \u2192</button></div>
+</div>
+<!-- Step 3: Confirmation -->
+<div class="form-card" id="step3">
+<div class="confirm-page">
+<h2 style="font-size:16px;color:#e6edf3">Order Confirmed!</h2>
+<p style="color:#8b949e;margin-top:8px">Your order has been placed successfully.</p>
+<div class="order-id" id="orderId"></div>
+<div class="details" id="confirmDetails"></div>
+<div class="btn-row" style="justify-content:center"><button class="btn btn-secondary" onclick="resetWizard()">Start Over</button></div>
+</div>
+</div>
+</div>
+<div class="preview-overlay" id="previewOverlay"><h2>Preview Mode</h2><p>This is an Agent exam page. Interaction disabled for preview.</p></div>
+<script>
+let currentStep=1;
+const ORDER_ID='ORD-20260322-A7X9';
+const params=new URLSearchParams(window.location.search);
+const isPreview=params.get('preview')==='1';
+if(isPreview){document.body.classList.add('preview-mode');document.getElementById('previewOverlay').style.display='flex'}
+function clearErrors(step){document.querySelectorAll('#step'+step+' .form-group').forEach(g=>g.classList.remove('has-error'))}
+function validateStep1(){clearErrors(1);let ok=true;const f=document.getElementById('fullName'),e=document.getElementById('email'),p=document.getElementById('phone'),a=document.getElementById('address');
+if(!f.value.trim()){f.closest('.form-group').classList.add('has-error');ok=false}
+if(!e.value.trim()||!e.value.includes('@')){e.closest('.form-group').classList.add('has-error');ok=false}
+if(!p.value.trim()){p.closest('.form-group').classList.add('has-error');ok=false}
+if(!a.value.trim()){a.closest('.form-group').classList.add('has-error');ok=false}
+return ok}
+function validateStep2(){clearErrors(2);let ok=true;const pm=document.getElementById('paymentMethod');
+if(!pm.value){pm.closest('.form-group').classList.add('has-error');ok=false}
+return ok}
+function goToStep(step){if(step===2&&!validateStep1())return;if(step===3){if(!validateStep2())return;showConfirmation()}
+document.querySelectorAll('.form-card').forEach(c=>c.classList.remove('active'));
+document.getElementById('step'+step).classList.add('active');
+for(let i=1;i<=3;i++){const dot=document.getElementById('dot'+i);dot.classList.remove('active','done');if(i<step)dot.classList.add('done');if(i===step)dot.classList.add('active')}
+for(let i=1;i<=2;i++){const line=document.getElementById('line'+i);line.classList.toggle('done',i<step)}
+currentStep=step}
+function showConfirmation(){document.getElementById('orderId').textContent=ORDER_ID;
+const pm=document.getElementById('paymentMethod');const pmText=pm.options[pm.selectedIndex].text;
+document.getElementById('confirmDetails').innerHTML=`
+<strong>Name:</strong> ${document.getElementById('fullName').value}<br>
+<strong>Email:</strong> ${document.getElementById('email').value}<br>
+<strong>Phone:</strong> ${document.getElementById('phone').value}<br>
+<strong>Address:</strong> ${document.getElementById('address').value}<br>
+<strong>Payment:</strong> ${pmText}<br>
+<strong>Notes:</strong> ${document.getElementById('notes').value||'None'}`}
+function resetWizard(){currentStep=1;document.querySelectorAll('input,textarea,select').forEach(el=>el.value='');document.querySelectorAll('.form-group').forEach(g=>g.classList.remove('has-error'));goToStep(1)}
+try{fetch('/api/exam-page/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page_id:'wizard',event:'visit'})}).catch(()=>{})}catch(e){}
+</script>
+</body>
+</html>

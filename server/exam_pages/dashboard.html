@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operations Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:20px}
+.header{margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-start}
+.header h1{font-size:20px;color:#58a6ff}
+.header p{font-size:13px;color:#8b949e;margin-top:4px}
+.filters{display:flex;gap:12px;align-items:center}
+.filters label{font-size:13px;color:#8b949e}
+.filters select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 12px;border-radius:4px;font-size:13px;cursor:pointer}
+.filters select:hover{border-color:#58a6ff}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+.stat-card{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:16px}
+.stat-card .label{font-size:12px;color:#8b949e;margin-bottom:4px}
+.stat-card .value{font-size:22px;font-weight:700}
+.green{color:#3fb950}.yellow{color:#d29922}.red{color:#f85149}.blue{color:#58a6ff}
+.table-container{border:1px solid #30363d;border-radius:6px;overflow:hidden}
+table{width:100%;border-collapse:collapse}
+th{background:#161b22;color:#8b949e;font-size:12px;font-weight:600;text-align:left;padding:10px 12px;border-bottom:1px solid #30363d}
+td{padding:8px 12px;border-bottom:1px solid #21262d;font-size:13px}
+tr:hover{background:#161b22}
+tr.error-row{background:#1a1215}
+tr.error-row:hover{background:#1a1518}
+.expand-btn{background:#21262d;color:#8b949e;border:1px solid #30363d;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px}
+.expand-btn:hover{border-color:#58a6ff;color:#c9d1d9}
+.expand-btn.expanded{background:#1f6feb;color:#fff;border-color:#1f6feb}
+.status-badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.st-ok{background:#1a3a2a;color:#3fb950}.st-warn{background:#3a2a1a;color:#d29922}.st-error{background:#3a1a1a;color:#f85149}
+.detail-row{display:none;background:#0d1117;border-bottom:1px solid #21262d}
+.detail-row.open{display:table-row}
+.detail-content{padding:12px 12px 12px 48px;font-size:13px;line-height:1.6;color:#8b949e}
+.detail-content .error-msg{color:#f85149;font-family:monospace;background:#1a1215;padding:8px 12px;border-radius:4px;margin-top:8px;font-size:12px}
+.detail-content .stack{color:#484f58;font-family:monospace;font-size:11px;margin-top:4px}
+.preview-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(13,17,23,0.85);z-index:9999;align-items:center;justify-content:center;flex-direction:column}
+.preview-overlay h2{color:#d29922;font-size:18px;margin-bottom:8px}
+.preview-overlay p{color:#8b949e;font-size:14px}
+body.preview-mode select,body.preview-mode .expand-btn{pointer-events:none;opacity:0.5}
+</style>
+</head>
+<body>
+<div class="header">
+<div><h1>Ops Dashboard</h1><p>Real-time service monitoring | Click rows to expand details</p></div>
+<div class="filters">
+<label>Status:</label>
+<select id="statusFilter" onchange="applyFilter()">
+<option value="all">All</option>
+<option value="OK">OK</option>
+<option value="WARNING">Warning</option>
+<option value="ERROR">Error</option>
+</select>
+</div>
+</div>
+<div class="stat-grid" id="statGrid"></div>
+<div class="table-container">
+<table>
+<thead><tr><th></th><th>Service</th><th>Status</th><th>Region</th><th>Latency</th><th>Last Check</th><th>Error Rate</th></tr></thead>
+<tbody id="tableBody"></tbody>
+</table>
+</div>
+<div class="preview-overlay" id="previewOverlay"><h2>Preview Mode</h2><p>This is an Agent exam page. Interaction disabled for preview.</p></div>
+<script>
+const services=[
+{name:"user-auth-api",status:"OK",region:"us-east-1",latency:"12ms",lastCheck:"2s ago",errorRate:"0.00%",detail:{uptime:"99.99%",requests:"45,230/min",version:"v3.2.1",lastDeploy:"2026-03-20"}},
+{name:"payment-processor",status:"OK",region:"us-east-1",latency:"45ms",lastCheck:"3s ago",errorRate:"0.01%",detail:{uptime:"99.95%",requests:"12,400/min",version:"v2.8.0",lastDeploy:"2026-03-19"}},
+{name:"inventory-service",status:"WARNING",region:"eu-west-1",latency:"230ms",lastCheck:"5s ago",errorRate:"2.30%",detail:{uptime:"98.70%",requests:"8,900/min",version:"v1.5.3",lastDeploy:"2026-03-15"}},
+{name:"notification-hub",status:"ERROR",region:"us-west-2",latency:"timeout",lastCheck:"15s ago",errorRate:"45.00%",detail:{uptime:"89.20%",requests:"0/min",version:"v4.1.0",lastDeploy:"2026-03-21",errorMsg:"Connection timeout to database replica-3",stack:"at NotificationHub.connect() /src/db/connection.js:142\nat processRequest() /src/handler.js:87"}},
+{name:"search-engine",status:"OK",region:"ap-south-1",latency:"18ms",lastCheck:"1s ago",errorRate:"0.00%",detail:{uptime:"99.98%",requests:"23,100/min",version:"v5.0.2",lastDeploy:"2026-03-22"}},
+{name:"order-management",status:"OK",region:"us-east-1",latency:"32ms",lastCheck:"2s ago",errorRate:"0.02%",detail:{uptime:"99.96%",requests:"18,700/min",version:"v3.1.4",lastDeploy:"2026-03-18"}},
+{name:"analytics-pipeline",status:"WARNING",region:"eu-west-1",latency:"890ms",lastCheck:"10s ago",errorRate:"1.50%",detail:{uptime:"97.80%",requests:"5,600/min",version:"v2.3.0",lastDeploy:"2026-03-14"}},
+{name:"cdn-edge-router",status:"OK",region:"global",latency:"3ms",lastCheck:"1s ago",errorRate:"0.00%",detail:{uptime:"100.00%",requests:"142,000/min",version:"v6.2.1",lastDeploy:"2026-03-22"}},
+{name:"media-storage",status:"OK",region:"us-west-2",latency:"28ms",lastCheck:"3s ago",errorRate:"0.01%",detail:{uptime:"99.99%",requests:"34,500/min",version:"v1.9.7",lastDeploy:"2026-03-17"}},
+{name:"config-service",status:"ERROR",region:"ap-east-1",latency:"timeout",lastCheck:"30s ago",errorRate:"100.00%",detail:{uptime:"45.30%",requests:"0/min",version:"v1.2.0",lastDeploy:"2026-03-10",errorMsg:"Failed to connect to etcd cluster: leader election timeout",stack:"at EtcdClient.elect() /src/etcd/client.go:203\nat ConfigWatcher.start() /src/config/watcher.go:56"}},
+{name:"session-manager",status:"OK",region:"us-east-1",latency:"8ms",lastCheck:"1s ago",errorRate:"0.00%",detail:{uptime:"99.99%",requests:"67,800/min",version:"v2.0.5",lastDeploy:"2026-03-21"}},
+{name:"email-relay",status:"OK",region:"eu-west-1",latency:"55ms",lastCheck:"4s ago",errorRate:"0.10%",detail:{uptime:"99.90%",requests:"3,200/min",version:"v1.4.2",lastDeploy:"2026-03-16"}}
+];
+let currentFilter='all';let expandedRows=new Set();
+const params=new URLSearchParams(window.location.search);
+const isPreview=params.get('preview')==='1';
+if(isPreview){document.body.classList.add('preview-mode');document.getElementById('previewOverlay').style.display='flex'}
+function applyFilter(){currentFilter=document.getElementById('statusFilter').value;render()}
+function toggleExpand(idx){if(expandedRows.has(idx))expandedRows.delete(idx);else expandedRows.add(idx);render()}
+function renderStats(){
+const filtered=currentFilter==='all'?services:services.filter(s=>s.status===currentFilter);
+const ok=filtered.filter(s=>s.status==='OK').length;
+const warn=filtered.filter(s=>s.status==='WARNING').length;
+const err=filtered.filter(s=>s.status==='ERROR').length;
+document.getElementById('statGrid').innerHTML=`
+<div class="stat-card"><div class="label">Total Services</div><div class="value blue">${filtered.length}</div></div>
+<div class="stat-card"><div class="label">OK</div><div class="value green">${ok}</div></div>
+<div class="stat-card"><div class="label">Warning</div><div class="value yellow">${warn}</div></div>
+<div class="stat-card"><div class="label">Error</div><div class="value red">${err}</div></div>`}
+function render(){
+renderStats();
+const filtered=currentFilter==='all'?services:services.filter(s=>s.status===currentFilter);
+const tbody=document.getElementById('tableBody');
+let html='';
+filtered.forEach((s,i)=>{
+const origIdx=services.indexOf(s);
+const stClass=s.status==='OK'?'st-ok':s.status==='WARNING'?'st-warn':'st-error';
+const rowClass=s.status==='ERROR'?'error-row':'';
+const isExpanded=expandedRows.has(origIdx);
+html+=`<tr class="${rowClass}"><td><button class="expand-btn ${isExpanded?'expanded':''}" onclick="toggleExpand(${origIdx})">${isExpanded?'\u25B2':'\u25BC'}</button></td><td><code>${s.name}</code></td><td><span class="status-badge ${stClass}">${s.status}</span></td><td>${s.region}</td><td>${s.latency}</td><td>${s.lastCheck}</td><td>${s.errorRate}</td></tr>`;
+if(isExpanded){let detailHtml=`<div class="detail-content"><strong>Uptime:</strong> ${s.detail.uptime} | <strong>Requests:</strong> ${s.detail.requests} | <strong>Version:</strong> ${s.detail.version} | <strong>Last Deploy:</strong> ${s.detail.lastDeploy}`;
+if(s.detail.errorMsg)detailHtml+=`<div class="error-msg">${s.detail.errorMsg}</div>`;
+if(s.detail.stack)detailHtml+=`<div class="stack">${s.detail.stack}</div>`;
+html+=`<tr class="detail-row open"><td colspan="7">${detailHtml}</div></tr>`}});
+tbody.innerHTML=html}
+render();
+try{fetch('/api/exam-page/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page_id:'dashboard',event:'visit'})}).catch(()=>{})}catch(e){}
+</script>
+</body>
+</html>

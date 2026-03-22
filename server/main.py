@@ -5,6 +5,9 @@ import uuid
 import asyncio
 import os
 import time
+import secrets
+import hashlib
+import hmac
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Any
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -17,24 +20,36 @@ import uvicorn
 from .models import (
     ExamLevel, ExamSession, TaskSubmit, ValidationResult,
     TaskResult, ExamScore, LeaderboardEntry, ExecutionLog,
-    RegisterRequest
+    RegisterRequest, BaseModel
 )
 from .validators import (
     BrowserActionValidator, BrowserContextHTTPValidator,
+    GitHubIssueDiscussionValidator,
     OpenPageAndExtractTitleValidator, OpenPageAndScreenshotValidator,
     ClickElementValidator, TypeAndSubmitValidator, WaitForContentValidator,
     LoopDetectionValidator, RefMapCacheValidator, ErrorTranslationValidator,
     OnDemandSnapshotValidator, ControlHandoverValidator,
-    SearchValidator, MultiStepValidator
+    SearchValidator, MultiStepValidator, BuiltInPageValidator
 )
 from .security import (
     security_manager, get_client_ip, verify_request,
     add_security_headers, SecurityManager
 )
+from .storage import get_storage
 
 
 # 题目配置
 from exam_papers import get_tasks_for_level
+
+
+def _get_base_url() -> str:
+    """获取对外服务的基础 URL，优先读环境变量 EXAM_BASE_URL，否则从请求头推断"""
+    return os.environ.get("EXAM_BASE_URL", "").rstrip("/")
+
+
+def _get_db() -> Any:
+    """获取存储实例（延迟初始化）"""
+    return get_storage()
 
 
 # 验证器工厂
@@ -48,25 +63,28 @@ def create_validator(validator_config: Dict) -> Optional[Any]:
         return BrowserActionValidator(**{k: v for k, v in validator_config.items() if k != "type"})
     elif validator_type == "BrowserContextHTTPValidator":
         return BrowserContextHTTPValidator(**{k: v for k, v in validator_config.items() if k != "type"})
-    elif validator_type == "JSONPathValidator":
-        from .validators import JSONPathValidator
-        return JSONPathValidator(
-            url=validator_config["url"],
-            json_path=validator_config["json_path"],
-            expected=validator_config.get("expected")
+    elif validator_type == "GitHubIssueDiscussionValidator":
+        return GitHubIssueDiscussionValidator(
+            max_score=validator_config.get("max_score", 20),
+            challenge_code=validator_config.get("challenge_code"),
+            exam_token=validator_config.get("exam_token"),
         )
-    elif validator_type == "HTTPAPIValidator":
-        from .validators import HTTPAPIValidator
-        return HTTPAPIValidator(
-            expected_url=validator_config["expected_url"],
-            expected_pattern=validator_config.get("expected_pattern")
+    elif validator_type == "BuiltInPageValidator":
+        from .exam_pages import PAGE_ANSWERS
+        page_id = validator_config.get("page_id")
+        expected = PAGE_ANSWERS.get(page_id, "")
+        return BuiltInPageValidator(
+            page_id=page_id,
+            expected_answer=expected,
+            required_operations=validator_config.get("required_operations", []),
+            max_score=validator_config.get("max_score", 15),
         )
+
     return None
 
 
-# 存储
-exam_sessions: Dict[str, ExamSession] = {}
-leaderboard: Dict[str, list] = {"v1": [], "v2": [], "v3": []}
+# 存储（已迁移至 SQLite，保留变量名兼容）
+# exam_sessions, leaderboard, page_stats 现在通过 get_storage() 访问
 
 
 app = FastAPI(title="Agent Browser Exam", version="1.0.0")
@@ -136,9 +154,59 @@ if os.path.exists(web_dir):
 exam_papers_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "exam_papers", "md")
 
 
+# ============ 内置考题页面路由 ============
+
+@app.get("/exam-page/{page_id}")
+async def get_exam_page(page_id: str, request: Request, preview: bool = False):
+    """获取内置考题页面"""
+    from .exam_pages import get_page_path
+    file_path = get_page_path(page_id)
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="考题页面不存在")
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 记录访问
+    db = _get_db()
+    db.increment_page_stat(page_id, "visits")
+    db.update_page_last_visit(page_id)
+
+    return Response(
+        content=content,
+        media_type="text/html",
+        headers={"Content-Disposition": "inline"}
+    )
+
+
+class PageTrackRequest(BaseModel):
+    """页面访问追踪请求"""
+    page_id: str
+    event: str  # "visit" | "click" | "interaction"
+
+
+@app.post("/api/exam-page/track")
+async def track_page_event(data: PageTrackRequest):
+    """记录页面访问/操作事件（由页面 JS 调用）"""
+    db = _get_db()
+    if data.event == "visit":
+        db.increment_page_stat(data.page_id, "visits")
+        db.update_page_last_visit(data.page_id)
+    elif data.event == "click":
+        db.increment_page_stat(data.page_id, "clicks")
+
+    return {"ok": True}
+
+
+@app.get("/api/exam-page/stats")
+async def get_page_stats():
+    """获取所有内置页面的访问统计"""
+    return {"pages": _get_db().get_page_stats()}
+
+
 @app.get("/exam/{filename}")
-async def get_exam_paper(filename: str):
-    """获取试卷文件"""
+async def get_exam_paper(filename: str, request: Request):
+    """获取试卷文件，动态替换 BASE_URL 占位符"""
     if filename not in ["v1.md", "v2.md", "v3.md"]:
         raise HTTPException(status_code=404, detail="试卷不存在")
 
@@ -146,10 +214,24 @@ async def get_exam_paper(filename: str):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="试卷文件不存在")
 
-    return FileResponse(
-        file_path,
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 动态推断 BASE_URL
+    base_url = _get_base_url()
+    if not base_url:
+        # 从请求头推断
+        host = request.headers.get("host", "localhost:8080")
+        scheme = request.headers.get("x-forwarded-proto", "http")
+        base_url = f"{scheme}://{host}"
+
+    # 将所有 localhost:8080 替换为实际域名
+    content = content.replace("http://localhost:8080", base_url)
+
+    return Response(
+        content=content,
         media_type="text/markdown",
-        filename=filename
+        headers={"Content-Disposition": f'inline; filename="{filename}"'}
     )
 
 
@@ -163,7 +245,7 @@ async def favicon():
 async def get_cert_page(exam_token: str):
     """获取证书页面 - 动态查询考试成绩"""
 
-    if exam_token not in exam_sessions:
+    if not (session := _get_db().get_session(exam_token)):
         cert_html = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -186,7 +268,6 @@ async def get_cert_page(exam_token: str):
         from fastapi.responses import HTMLResponse
         return HTMLResponse(content=cert_html)
 
-    session = exam_sessions[exam_token]
     score_data = await _get_exam_score(session)
 
     task_rows = ""
@@ -301,7 +382,35 @@ async def get_cert_page(exam_token: str):
 
 
 def generate_exam_token() -> str:
-    return uuid.uuid4().hex[:12].upper()
+    """
+    生成带 HMAC 签名的准考证号，防止 Agent 伪造。
+    格式: {随机ID}_{HMAC签名}
+    随机ID: 16 字符 hex (64 bit entropy)
+    签名: 8 字符 hex (32 bit HMAC-SHA256)
+    Agent 即使猜到 ID，没有 HMAC_SECRET 也无法伪造有效签名。
+    """
+    _hmac_secret = os.environ.get("EXAM_HMAC_SECRET", "agent_browser_exam_2026_secret")
+    token_id = secrets.token_hex(8).upper()  # 16 字符
+    sig = hmac.new(
+        _hmac_secret.encode(),
+        token_id.encode(),
+        hashlib.sha256
+    ).hexdigest()[:8].upper()
+    return f"{token_id}_{sig}"
+
+
+def verify_exam_token(token: str) -> bool:
+    """验证准考证号的 HMAC 签名是否有效"""
+    if "_" not in token:
+        return False
+    token_id, sig = token.rsplit("_", 1)
+    _hmac_secret = os.environ.get("EXAM_HMAC_SECRET", "agent_browser_exam_2026_secret")
+    expected_sig = hmac.new(
+        _hmac_secret.encode(),
+        token_id.encode(),
+        hashlib.sha256
+    ).hexdigest()[:8].upper()
+    return hmac.compare_digest(sig, expected_sig)
 
 
 def calculate_grade(total_score: int, max_score: int) -> str:
@@ -374,6 +483,21 @@ async def register(request: Request, data: RegisterRequest):
     # 获取题目
     tasks = get_tasks_for_level(data.exam_id)
 
+    # 为 L3-4（GitHub Issue 讨论）注入 challenge_code
+    challenge_code = None
+    for task in tasks:
+        if task.get("id") == "L3-4":
+            challenge_code = secrets.token_hex(4).upper()  # 8字符大写十六进制
+            # 将 challenge_code 嵌入 instructions
+            task["instructions"] = (
+                f"【你的专属验证码】Verify: {challenge_code}\n\n"
+                + task["instructions"]
+            )
+            # 将 challenge_code 写入 validator_config，供验证器使用
+            if task.get("validator_config"):
+                task["validator_config"]["challenge_code"] = challenge_code
+            break
+
     # 创建会话
     session = ExamSession(
         exam_token=exam_token,
@@ -388,7 +512,7 @@ async def register(request: Request, data: RegisterRequest):
         current_task_index=0
     )
 
-    exam_sessions[exam_token] = session
+    _get_db().save_session(session)
 
     return {
         "exam_token": exam_token,
@@ -404,6 +528,10 @@ async def register(request: Request, data: RegisterRequest):
 async def submit_answer(request: Request, data: TaskSubmit):
     """提交答案或执行日志"""
 
+    # 验证准考证号签名
+    if not verify_exam_token(data.exam_token):
+        raise HTTPException(status_code=403, detail="无效的准考证号，签名验证失败")
+
     # 提交不需要 API Key，使用 exam_token 验证
     ip = get_client_ip(request)
 
@@ -418,10 +546,9 @@ async def submit_answer(request: Request, data: TaskSubmit):
     exam_token = data.exam_token
     task_id = data.task_id
 
-    if exam_token not in exam_sessions:
+    session = _get_db().get_session(exam_token)
+    if not session:
         raise HTTPException(status_code=404, detail="考试会话不存在或已过期")
-
-    session = exam_sessions[exam_token]
 
     # 检查是否已超时（30分钟）
     if datetime.now() - session.started_at > timedelta(minutes=30):
@@ -445,8 +572,8 @@ async def submit_answer(request: Request, data: TaskSubmit):
         raise HTTPException(status_code=500, detail="题目验证器未配置")
 
     # 执行验证
-    execution_log = ExecutionLog(**data.execution_log) if data.execution_log else None
-    result = await validator.validate(data.answer, execution_log)
+    # data.execution_log 已经被 Pydantic 解析为 ExecutionLog 对象，直接使用
+    result = await validator.validate(data.answer, data.execution_log)
 
     # 记录结果
     task_result = TaskResult(
@@ -473,6 +600,9 @@ async def submit_answer(request: Request, data: TaskSubmit):
     else:
         session.completed = True
 
+    # 持久化 session
+    _get_db().save_session(session)
+
     # 如果完成，生成成绩
     if session.completed:
         await _finalize_exam(session)
@@ -495,10 +625,12 @@ async def submit_answer(request: Request, data: TaskSubmit):
 async def get_next_question(exam_token: str):
     """断线重连时获取当前题目"""
 
-    if exam_token not in exam_sessions:
-        raise HTTPException(status_code=404, detail="考试会话不存在或已过期")
+    if not verify_exam_token(exam_token):
+        raise HTTPException(status_code=403, detail="无效的准考证号")
 
-    session = exam_sessions[exam_token]
+    session = _get_db().get_session(exam_token)
+    if not session:
+        raise HTTPException(status_code=404, detail="考试会话不存在或已过期")
 
     if session.completed:
         return {"all_done": True, "score": await _get_total_score(session)}
@@ -507,6 +639,7 @@ async def get_next_question(exam_token: str):
     for i, t in enumerate(session.tasks):
         if t["id"] not in session.results:
             session.current_task_index = i
+            _get_db().save_session(session)
             return {"next_question": t, "all_done": False}
 
     return {"all_done": True}
@@ -516,10 +649,12 @@ async def get_next_question(exam_token: str):
 async def get_score(exam_token: str):
     """获取考试成绩"""
 
-    if exam_token not in exam_sessions:
-        raise HTTPException(status_code=404, detail="考试会话不存在或已过期")
+    if not verify_exam_token(exam_token):
+        raise HTTPException(status_code=403, detail="无效的准考证号")
 
-    session = exam_sessions[exam_token]
+    session = _get_db().get_session(exam_token)
+    if not session:
+        raise HTTPException(status_code=404, detail="考试会话不存在或已过期")
 
     if not session.completed:
         # 返回当前进度
@@ -544,7 +679,7 @@ async def _finalize_exam(session: ExamSession):
     grade = calculate_grade(score, max_score)
 
     entry = LeaderboardEntry(
-        rank=0,  # 稍后计算
+        rank=0,
         agent_name=session.agent_name,
         agent_type=session.agent_type,
         total_score=score,
@@ -554,13 +689,7 @@ async def _finalize_exam(session: ExamSession):
         exam_id=session.exam_id
     )
 
-    # 添加到排行榜并排序
-    leaderboard[level].append(entry)
-    leaderboard[level].sort(key=lambda x: (-x.total_score, x.total_time_seconds))
-
-    # 更新排名
-    for i, e in enumerate(leaderboard[level]):
-        e.rank = i + 1
+    _get_db().add_leaderboard_entry(level, entry)
 
 
 async def _get_total_score(session: ExamSession) -> int:
@@ -599,8 +728,10 @@ async def _get_exam_score(session: ExamSession) -> Dict:
 async def get_leaderboard(level: str):
     """获取排行榜"""
 
-    if level not in leaderboard:
+    if level not in ["v1", "v2", "v3"]:
         raise HTTPException(status_code=404, detail="考试级别不存在")
+
+    entries = _get_db().get_leaderboard(level)
 
     return {
         "level": level,
@@ -614,7 +745,7 @@ async def get_leaderboard(level: str):
                 "total_time_seconds": e.total_time_seconds,
                 "grade": e.grade
             }
-            for e in leaderboard[level][:20]  # 只返回前20
+            for e in entries
         ]
     }
 
@@ -623,10 +754,12 @@ async def get_leaderboard(level: str):
 async def get_certificate(exam_token: str):
     """获取证书"""
 
-    if exam_token not in exam_sessions:
-        raise HTTPException(status_code=404, detail="考试会话不存在")
+    if not verify_exam_token(exam_token):
+        raise HTTPException(status_code=403, detail="无效的准考证号")
 
-    session = exam_sessions[exam_token]
+    session = _get_db().get_session(exam_token)
+    if not session:
+        raise HTTPException(status_code=404, detail="考试会话不存在")
 
     if not session.completed:
         raise HTTPException(status_code=400, detail="考试尚未完成")
@@ -740,9 +873,10 @@ async def get_stats(request: Request):
 
     return {
         "security": security_manager.get_stats(),
-        "active_sessions": len(exam_sessions),
+        "active_sessions": _get_db().session_count(),
         "leaderboard_entries": {
-            level: len(entries) for level, entries in leaderboard.items()
+            level: _get_db().leaderboard_count(level)
+            for level in ["v1", "v2", "v3"]
         }
     }
 
@@ -758,17 +892,11 @@ async def cleanup(request: Request):
     cleaned = security_manager.cleanup_stale_sessions()
 
     # 清理过期的考试会话
-    now = datetime.now()
-    expired_tokens = [
-        token for token, session in exam_sessions.items()
-        if now - session.started_at > timedelta(minutes=60)
-    ]
-    for token in expired_tokens:
-        del exam_sessions[token]
+    cleaned_exam = _get_db().cleanup_expired_sessions(60)
 
     return {
         "cleaned_ip_sessions": cleaned,
-        "cleaned_exam_sessions": len(expired_tokens)
+        "cleaned_exam_sessions": cleaned_exam
     }
 
 

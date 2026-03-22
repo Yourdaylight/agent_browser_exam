@@ -10,13 +10,15 @@ from server.validators import (
     ClickElementValidator,
     TypeAndSubmitValidator,
     WaitForContentValidator,
+    GitHubIssueDiscussionValidator,
     LoopDetectionValidator,
     RefMapCacheValidator,
     ErrorTranslationValidator,
     OnDemandSnapshotValidator,
     SearchValidator,
     MultiStepValidator,
-    ControlHandoverValidator
+    ControlHandoverValidator,
+    BuiltInPageValidator
 )
 
 
@@ -87,7 +89,7 @@ L1_TASKS = [
 2. 提取页面的 <title> 标签内容
 3. 提交提取到的标题文本""",
         validator=OpenPageAndExtractTitleValidator(),
-        max_score=5,
+        max_score=20,
         level="L1",
         hints=[
             "Playwright: page.goto('https://example.com') 然后 page.title()",
@@ -111,9 +113,9 @@ L1_TASKS = [
             url_pattern=r"example\.com",
             expected_content="Example Domain",
             validate_action="navigate",
-            max_score=5
+            max_score=20
         ),
-        max_score=5,
+        max_score=20,
         level="L1",
         hints=[
             "Playwright: page.locator('h1').textContent()",
@@ -137,9 +139,9 @@ L1_TASKS = [
             url_pattern=r"example\.com",
             validate_action="click",
             validate_selector="a",
-            max_score=5
+            max_score=20
         ),
-        max_score=5,
+        max_score=20,
         level="L1",
         hints=[
             "先 page.goto() 打开 example.com",
@@ -168,9 +170,9 @@ L1_TASKS = [
             api_url="https://httpbin.org/json",
             json_path="slideshow.title",
             expected="Slide 1",
-            max_score=5
+            max_score=20
         ),
-        max_score=5,
+        max_score=20,
         level="L1",
         hints=[
             "验证器要求：execution_log 中必须有 navigate 操作",
@@ -197,9 +199,9 @@ L1_TASKS = [
             api_url="https://httpbin.org/post",
             json_path="form.name",
             expected="TestUser",
-            max_score=5
+            max_score=20
         ),
-        max_score=5,
+        max_score=20,
         level="L1",
         hints=[
             "验证器要求：execution_log 中必须有 navigate 操作",
@@ -212,98 +214,238 @@ L1_TASKS = [
 
 
 # ============================================
-# L2 中级能力题目 - 浏览器交互与高级操作
+# L2 中级能力题目 - 浏览器 UI 交互操作
+# 5 道内置页面题 + 2 道外部网站题 = 100 分
 # ============================================
 
 L2_TASKS = [
+    # ---- 内置页面题（5道）----
+
     Task(
         task_id="L2-1",
-        title="循环检测能力",
-        description="验证 Agent 能否检测到重复操作并停止",
-        instructions="""请模拟以下场景：
+        title="服务器数据表格翻页",
+        description="在内置服务器监控页面中翻页并提取特定数据",
+        instructions="""请使用浏览器自动化工具完成以下操作：
 
-1. 打开浏览器，访问任意页面
-2. 编写脚本连续点击"下一页"按钮 10 次
-3. 如果 Agent 有循环检测能力，应该在检测到重复操作后停止
-4. 上传执行日志（包含 actions 和 events）
+1. 打开浏览器，访问考试服务器的内置页面: {base_url}/exam-page/data-table
+2. 这是一个服务器监控数据表格，共 50 条记录，每页 10 条，共 5 页
+3. 翻到第 3 页（需要点击"下一页"按钮或页码"3"）
+4. 在第 3 页中找到 IP 地址为 10.0.2.15 的服务器
+5. 提取该服务器的 CPU 使用率（CPU Usage 列）
+6. 提交提取到的 CPU 使用率
 
-【关键】需要在 execution_log.events 中记录 loop_detected 事件。""",
-        validator=LoopDetectionValidator(
-            max_consecutive_same=3,
-            max_attempts_before_stop=5
+【注意】目标数据只在第 3 页出现，你必须真正执行翻页操作。""",
+        validator=BuiltInPageValidator(
+            page_id="data-table",
+            expected_answer="78.3%",
+            required_operations=[
+                {"type": "navigate"},
+                {"type": "click"},
+            ],
+            max_score=15,
         ),
         max_score=15,
         level="L2",
         hints=[
-            "循环检测应识别连续相同类型的操作",
-            "检查 execution_log.events 中是否有 loop_detected 事件",
-            "metadata 中应该有循环检测配置"
+            "先 page.goto() 访问 /exam-page/data-table",
+            "需要点击'下一页'按钮翻到第 3 页",
+            "目标服务器 IP 是 10.0.2.15",
+            "在表格中找到该行后，提取 CPU Usage 列的值"
         ]
     ),
 
     Task(
         task_id="L2-2",
-        title="页面缓存命中率",
-        description="验证同一页面重复访问时的缓存能力",
-        instructions="""请执行以下操作：
+        title="商品排序与筛选",
+        description="在内置电商页面中排序和筛选商品，找到最贵的电子产品",
+        instructions="""请使用浏览器自动化工具完成以下操作：
 
-1. 首次访问 https://example.com，记录 token 消耗
-2. 再次访问同一页面，验证是否使用缓存
-3. 上传两次访问的 token 消耗数据到 metadata
+1. 打开浏览器，访问考试服务器的内置页面: {base_url}/exam-page/products
+2. 这是一个电商商品目录页面，包含 32 件商品
+3. 使用排序下拉框，选择 "Price: High to Low" 按价格降序排列
+4. 使用分类筛选下拉框，选择 "Electronics"
+5. 排在最前面的商品即为最贵的电子产品
+6. 提取该商品的名称并提交
 
-预期：第二次访问 token < 第一次的 10%""",
-        validator=RefMapCacheValidator(
-            cache_hit_threshold=0.9
+【注意】必须同时执行排序和筛选操作，否则结果不正确。""",
+        validator=BuiltInPageValidator(
+            page_id="products",
+            expected_answer="ProMax Ultra Monitor",
+            required_operations=[
+                {"type": "navigate"},
+                {"type": "click"},
+            ],
+            max_score=15,
         ),
         max_score=15,
         level="L2",
         hints=[
-            "需要在 metadata 中记录 first_visit_tokens 和 second_visit_tokens",
-            "检查第二次访问是否有 cache_hit 事件"
+            "先 page.goto() 访问 /exam-page/products",
+            "使用 select 元素选择排序方式: 'price-desc'",
+            "使用分类筛选选择 'Electronics'",
+            "最贵的电子产品是 ProMax Ultra Monitor"
         ]
     ),
 
     Task(
         task_id="L2-3",
-        title="错误信息友好度",
-        description="验证 Agent 的错误信息是否 AI 友好",
-        instructions="""请执行一个会失败的操作（如使用错误的 selector），验证返回的错误信息是否包含：
-1. 错误类型的描述
-2. 可能的解决方案或建议
+        title="多步表单向导",
+        description="在内置订单向导页面中填写表单并获取订单号",
+        instructions="""请使用浏览器自动化工具完成以下操作：
 
-上传错误日志进行分析。""",
-        validator=ErrorTranslationValidator(
-            required_keywords=["selector", "建议", "try"]
+1. 打开浏览器，访问考试服务器的内置页面: {base_url}/exam-page/wizard
+2. 这是一个 3 步订单向导表单
+3. 在第 1 步（收货信息）中填写所有必填字段:
+   - Full Name: 任意名字
+   - Email Address: 有效的邮箱格式
+   - Phone Number: 任意电话号码
+   - Shipping Address: 任意地址
+4. 点击 "Next Step" 按钮进入第 2 步
+5. 在第 2 步（支付方式）中选择任意支付方式
+6. 点击 "Next Step" 按钮进入第 3 步确认页
+7. 在确认页找到订单号（格式为 ORD-XXXXXXXX-XXXX）
+8. 提交完整的订单号
+
+【注意】每步都有必填验证，不填写无法进入下一步。""",
+        validator=BuiltInPageValidator(
+            page_id="wizard",
+            expected_answer="ORD-20260322-A7X9",
+            required_operations=[
+                {"type": "navigate"},
+                {"type": "type"},
+                {"type": "click"},
+            ],
+            max_score=15,
         ),
-        max_score=10,
+        max_score=15,
         level="L2",
         hints=[
-            "错误信息应该包含 'selector' 关键词",
-            "应该给出修复建议或下一步操作",
-            "检查 events 中 type=error 的事件"
+            "先 page.goto() 访问 /exam-page/wizard",
+            "使用 page.fill() 或 page.type() 填写必填字段",
+            "点击 'Next Step' 按钮进入下一步",
+            "最后一步会显示订单号 ORD-20260322-A7X9"
         ]
     ),
 
     Task(
         task_id="L2-4",
-        title="按需快照策略",
-        description="验证快照是否按需触发而非每次操作都触发",
-        instructions="""请执行以下操作：
+        title="文档标签页切换",
+        description="在内置系统文档页面中切换标签页，查找安全漏洞数据",
+        instructions="""请使用浏览器自动化工具完成以下操作：
 
-1. 访问同一页面 3 次，每次间隔 2 秒
-2. 验证快照是否在 TTL 有效期内被缓存复用
-3. 上传执行日志到 metadata
+1. 打开浏览器，访问考试服务器的内置页面: {base_url}/exam-page/tabs
+2. 这是一个系统文档页面，顶部有 5 个标签页: Overview / Performance / Security / Network / Logs
+3. 默认显示的是 "Overview" 标签页内容
+4. 点击 "Security" 标签页
+5. 在 Security 标签页中找到漏洞报告表格
+6. 统计 "Critical" 级别的漏洞数量
+7. 提交 Critical 级别的漏洞数量
 
-预期：TTL 命中次数 > 0 或快照次数 <= 3""",
-        validator=OnDemandSnapshotValidator(
-            max_snapshot_count=3
+【注意】Critical 漏洞数据只在 Security 标签页中显示。""",
+        validator=BuiltInPageValidator(
+            page_id="tabs",
+            expected_answer="3",
+            required_operations=[
+                {"type": "navigate"},
+                {"type": "click"},
+            ],
+            max_score=10,
         ),
         max_score=10,
         level="L2",
         hints=[
-            "按需快照应该有 TTL 机制",
-            "metadata.ttl_hits 应该 > 0",
-            "快照次数应该 <= max_snapshot_count"
+            "先 page.goto() 访问 /exam-page/tabs",
+            "点击 'Security' 标签按钮切换到安全页",
+            "在漏洞表格中查找 Severity 列为 Critical 的行",
+            "Critical 级别的漏洞有 3 个"
+        ]
+    ),
+
+    Task(
+        task_id="L2-5",
+        title="综合监控仪表盘",
+        description="在内置运维仪表盘中筛选错误状态并展开详情",
+        instructions="""请使用浏览器自动化工具完成以下操作：
+
+1. 打开浏览器，访问考试服务器的内置页面: {base_url}/exam-page/dashboard
+2. 这是一个运维监控仪表盘，包含多个服务的状态信息
+3. 使用状态下拉筛选框，选择 "Error" 过滤出错误状态的服务
+4. 在筛选结果中，找到第一条错误服务
+5. 点击该行左侧的展开按钮（▶ 按钮）展开详细信息
+6. 在展开的详情中找到错误信息（红色文字显示）
+7. 提交该错误信息的完整文本
+
+【注意】必须先筛选再展开，直接展开全部数据中的行找不到目标。""",
+        validator=BuiltInPageValidator(
+            page_id="dashboard",
+            expected_answer="Connection timeout to database replica-3",
+            required_operations=[
+                {"type": "navigate"},
+                {"type": "click"},
+            ],
+            max_score=15,
+        ),
+        max_score=15,
+        level="L2",
+        hints=[
+            "先 page.goto() 访问 /exam-page/dashboard",
+            "使用 select 元素选择 Status = Error",
+            "点击第一条错误行左侧的展开按钮",
+            "错误信息是: Connection timeout to database replica-3"
+        ]
+    ),
+
+    # ---- 外部网站题（2道）----
+
+    Task(
+        task_id="L2-6",
+        title="东方财富页面内容读取",
+        description="访问东方财富网站并提取页面标题",
+        instructions="""请使用浏览器自动化工具完成以下操作：
+
+1. 打开浏览器，访问 https://www.eastmoney.com （东方财富官网）
+2. 等待页面加载完成
+3. 提取页面的 <title> 标签内容
+4. 提交提取到的标题文本
+
+【注意】必须使用浏览器操作，不能直接用 curl 获取！""",
+        validator=BrowserActionValidator(
+            url_pattern=r"eastmoney\.com",
+            validate_action="navigate",
+            expected_content="东方财富网",
+            max_score=15
+        ),
+        max_score=15,
+        level="L2",
+        hints=[
+            "Playwright: page.goto('https://www.eastmoney.com') 然后 page.title()",
+            "标题包含'东方财富网'关键词即可通过"
+        ]
+    ),
+
+    Task(
+        task_id="L2-7",
+        title="Wikipedia 信息提取",
+        description="访问 Wikipedia 页面，提取文章标题和首段内容",
+        instructions="""请使用浏览器自动化工具完成以下操作：
+
+1. 打开浏览器，访问 https://en.wikipedia.org/wiki/Python_(programming_language)
+2. 等待页面加载完成
+3. 提取页面的 <title> 标签内容
+4. 提交提取到的标题文本
+
+【注意】必须使用浏览器操作，不能直接用 HTTP API 获取！""",
+        validator=BrowserActionValidator(
+            url_pattern=r"wikipedia\.org/wiki/Python",
+            validate_action="navigate",
+            expected_content="Python (programming language) - Wikipedia",
+            max_score=15
+        ),
+        max_score=15,
+        level="L2",
+        hints=[
+            "Playwright: page.goto('https://en.wikipedia.org/wiki/Python_(programming_language)')",
+            "标题格式为 'Python (programming language) - Wikipedia'"
         ]
     ),
 ]
@@ -330,7 +472,7 @@ L3_TASKS = [
             search_url="https://www.baidu.com",
             expected_keyword="github"
         ),
-        max_score=15,
+        max_score=25,
         level="L3",
         hints=[
             "搜索框的 selector 通常是 #kw 或 input[name='wd']",
@@ -356,7 +498,7 @@ L3_TASKS = [
                 {"type": "click"}
             ]
         ),
-        max_score=15,
+        max_score=25,
         level="L3",
         hints=[
             "预期步骤：先导航到 example.com，再执行点击操作",
@@ -377,7 +519,7 @@ L3_TASKS = [
 
 上传完整的事件序列日志。""",
         validator=ControlHandoverValidator(),
-        max_score=15,
+        max_score=25,
         level="L3",
         hints=[
             "事件序列应该是: control_handover -> user_action -> control_resume",
@@ -388,25 +530,37 @@ L3_TASKS = [
 
     Task(
         task_id="L3-4",
-        title="GitHub 页面操作",
-        description="在 GitHub 网页上执行操作（不用 API）",
+        title="GitHub Issue 阅读与评论",
+        description="用浏览器访问 GitHub Issue，阅读内容并发表包含验证码的结构化评论",
         instructions="""请使用浏览器自动化工具完成以下操作：
 
-1. 打开浏览器，访问 https://github.com
-2. 提取页面的标题或任意文本内容
-3. 验证 GitHub 页面正常加载
+1. 打开浏览器，访问 GitHub Issue: https://github.com/Yourdaylight/agent_browser_exam/issues/1
+2. 仔细阅读 Issue 的标题和描述内容
+3. 在 Issue 的评论框中发表一条评论，评论必须严格遵循以下格式：
 
-【注意】必须访问 GitHub 网页，不用 GitHub API！""",
-        validator=BrowserActionValidator(
-            url_pattern=r"github\.com",
-            validate_action="navigate",
-            max_score=15
-        ),
-        max_score=15,
+---
+🤖 [AgentBrowserExam] {你的Agent名称} ({你使用的模型名称}) | Token: {你的准考证号} | Verify: {验证码}
+
+{你对这个 Issue 的看法或对 Agent Browser Exam 的建议，至少 30 个字符}
+---
+
+4. 将你在 GitHub 上发表的完整评论内容作为答案提交
+
+【重要说明】
+- 必须使用浏览器操作访问 Issue 页面（不能用 GitHub API）
+- 评论中的「验证码」是服务端为你生成的唯一标识，见本题 instructions 开头的 challenge 字段
+- 评论必须包含验证码，否则无法通过自动验证
+- 评论的「看法/建议」部分需要有实质内容（至少 30 个字符），不能是空话或纯表情
+- 服务端会自动验证评论中是否包含正确的验证码和 Issue 相关关键词""",
+        validator=GitHubIssueDiscussionValidator(),
+        max_score=25,
         level="L3",
         hints=[
-            "验证器会检查是否有 navigate 到 github.com",
-            "可以使用 page.content() 或 page.inner_text() 提取内容"
+            "先 page.goto('https://github.com/Yourdaylight/agent_browser_exam/issues/1')",
+            "注意阅读 Issue 标题「Agent讨论专区」和描述",
+            "评论开头必须包含 🤖 [AgentBrowserExam] 标识和验证码",
+            "验证码在题目 instructions 中有标注，格式为 Verify: xxxxxx",
+            "最终将你在 GitHub 发表的完整评论文本作为答案提交"
         ]
     ),
 ]

@@ -289,6 +289,188 @@ class WaitForContentValidator(BrowserActionValidator):
 
 
 # ============================================
+# L3 高级能力验证器
+# ============================================
+
+class GitHubIssueDiscussionValidator(BrowserActionValidator):
+    """
+    GitHub Issue 阅读与评论验证器（v2 — 内容质量导向）
+
+    Agent 必须：
+    1. 用浏览器访问指定 GitHub Issue 页面
+    2. 阅读 Issue 内容
+    3. 发表包含验证码的结构化评论
+    4. 将完整评论文本作为 answer 提交
+
+    自动验证维度：
+    - 浏览器操作序列（navigate + type + click + github.com URL）
+    - answer 包含服务端生成的 challenge_code
+    - answer 包含 AgentBrowserExam 标识
+    - answer 包含 Issue 相关关键词（证明读过页面）
+    - answer 有实质内容（最小长度检查）
+    """
+
+    ISSUE_URL = "https://github.com/Yourdaylight/agent_browser_exam/issues/1"
+
+    # Issue 页面中的关键信息，评论必须引用以证明读过
+    ISSUE_KEYWORDS = [
+        "Agent讨论专区",      # Issue 标题
+        "AgentBrowserExam",   # 标识前缀
+    ]
+
+    # 评论格式标识
+    AGENT_SIGNATURE = "[AgentBrowserExam]"
+
+    def __init__(self, max_score: int = 20,
+                 challenge_code: str = None,
+                 exam_token: str = None):
+        super().__init__(
+            url_pattern=r"github\.com/Yourdaylight/agent_browser_exam/issues",
+            required_actions=[
+                {"type": "navigate", "url_contains": "github.com/Yourdaylight/agent_browser_exam/issues"},
+                {"type": "type", "selector_contains": "textarea"},
+                {"type": "click", "selector_contains": "comment"},
+            ],
+            max_score=max_score
+        )
+        self.issue_url = self.ISSUE_URL
+        self.challenge_code = challenge_code
+        self.exam_token = exam_token
+
+    async def validate(
+        self,
+        answer: Optional[str],
+        execution_log: Optional[ExecutionLog]
+    ) -> ValidationResult:
+        # ---- 第一层：浏览器操作验证（父类） ----
+        nav_result = await super().validate(answer, execution_log)
+        nav_passed = nav_result.correct
+
+        # ---- 第二层：评论内容验证 ----
+        content_checks = {
+            "has_answer": False,
+            "has_challenge_code": False,
+            "has_agent_signature": False,
+            "has_issue_keyword": False,
+            "min_length": False,
+        }
+
+        if not answer or not answer.strip():
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback="未提交评论内容。请在 GitHub Issue 发表评论后，将完整评论文本作为答案提交。",
+            )
+
+        content_checks["has_answer"] = True
+        answer_text = answer.strip()
+
+        # 1) 验证码检查
+        if self.challenge_code and self.challenge_code in answer_text:
+            content_checks["has_challenge_code"] = True
+        elif not self.challenge_code:
+            # 兼容旧模式：没有 challenge_code 时跳过此检查
+            content_checks["has_challenge_code"] = True
+
+        # 2) Agent 标识检查
+        if self.AGENT_SIGNATURE in answer_text:
+            content_checks["has_agent_signature"] = True
+
+        # 3) Issue 关键词检查（证明读过页面）
+        matched_keywords = [
+            kw for kw in self.ISSUE_KEYWORDS if kw in answer_text
+        ]
+        if matched_keywords:
+            content_checks["has_issue_keyword"] = True
+
+        # 4) 最小长度检查（实质内容）
+        # 去掉标识头后的内容长度
+        body_text = answer_text
+        for marker in [self.AGENT_SIGNATURE, "🤖", "Verify:", "Token:"]:
+            body_text = body_text.replace(marker, "")
+        content_length = len(body_text.strip())
+        if content_length >= 30:
+            content_checks["min_length"] = True
+
+        # ---- 计算得分 ----
+        # 总分分配: 浏览器操作 6分 + 验证码 5分 + Agent标识 3分 + Issue关键词 3分 + 内容长度 3分
+        score_map = {
+            "nav_passed": 6,
+            "has_challenge_code": 5,
+            "has_agent_signature": 3,
+            "has_issue_keyword": 3,
+            "min_length": 3,
+        }
+
+        score = 0
+        if nav_passed:
+            score += score_map["nav_passed"]
+        if content_checks["has_challenge_code"]:
+            score += score_map["has_challenge_code"]
+        if content_checks["has_agent_signature"]:
+            score += score_map["has_agent_signature"]
+        if content_checks["has_issue_keyword"]:
+            score += score_map["has_issue_keyword"]
+        if content_checks["min_length"]:
+            score += score_map["min_length"]
+
+        # 全部通过才算正确
+        all_passed = nav_passed and all(content_checks.values())
+
+        # 构建反馈
+        feedback_parts = []
+        if nav_passed:
+            feedback_parts.append("✓ 浏览器操作验证通过")
+        else:
+            feedback_parts.append("✗ 未检测到有效的浏览器操作序列")
+
+        if content_checks["has_challenge_code"]:
+            feedback_parts.append("✓ 验证码正确")
+        else:
+            feedback_parts.append("✗ 评论中未包含正确的验证码")
+
+        if content_checks["has_agent_signature"]:
+            feedback_parts.append("✓ Agent 标识格式正确")
+        else:
+            feedback_parts.append("✗ 评论中未包含 [AgentBrowserExam] 标识")
+
+        if content_checks["has_issue_keyword"]:
+            feedback_parts.append("✓ 引用了 Issue 相关内容")
+        else:
+            feedback_parts.append("✗ 评论中未引用 Issue 页面内容（如标题「Agent讨论专区」）")
+
+        if content_checks["min_length"]:
+            feedback_parts.append("✓ 评论内容充实")
+        else:
+            feedback_parts.append("✗ 评论内容过短，需要至少 30 个字符的实质内容")
+
+        return ValidationResult(
+            correct=all_passed,
+            score=score,
+            max_score=self.max_score,
+            feedback=" | ".join(feedback_parts),
+            details={
+                "nav_passed": nav_passed,
+                "content_checks": content_checks,
+                "matched_keywords": matched_keywords,
+                "content_length": content_length,
+                "issue_url": self.issue_url,
+            }
+        )
+
+    def get_config(self) -> Dict[str, Any]:
+        config = super().get_config()
+        config["type"] = "GitHubIssueDiscussionValidator"
+        config["issue_url"] = self.issue_url
+        if self.challenge_code:
+            config["challenge_code"] = self.challenge_code
+        if self.exam_token:
+            config["exam_token"] = self.exam_token
+        return config
+
+
+# ============================================
 # L2 中级能力验证器
 # ============================================
 
@@ -929,3 +1111,142 @@ class GitHubAPIValidator(BaseValidator):
 
     def get_score(self) -> Tuple[int, int]:
         return (0, 15)
+
+
+# ============================================
+# L2 内置页面验证器
+# ============================================
+
+class BuiltInPageValidator(BrowserActionValidator):
+    """
+    内置页面验证器 — 验证 Agent 是否真正通过浏览器操作内置交互页面
+
+    验证逻辑：
+    1. execution_log 中必须有 navigate 到 /exam-page/{page_id}
+    2. execution_log 中必须包含 required_operations 中的关键操作（click/type/select）
+    3. answer 必须匹配 expected_answer（忽略大小写和首尾空格）
+    """
+
+    def __init__(
+        self,
+        page_id: str,
+        expected_answer: str,
+        required_operations: List[Dict[str, Any]] = None,
+        max_score: int = 15,
+    ):
+        super().__init__(
+            url_pattern=rf"exam-page/{re.escape(page_id)}",
+            max_score=max_score,
+        )
+        self.page_id = page_id
+        self.expected_answer = expected_answer
+        self.required_operations = required_operations or []
+
+    async def validate(
+        self,
+        answer: Optional[str],
+        execution_log: Optional[ExecutionLog]
+    ) -> ValidationResult:
+        if not execution_log or not execution_log.actions:
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback="缺少执行日志，必须使用浏览器完成此题目"
+            )
+
+        actions = execution_log.actions
+
+        # 1. 检查 navigate 到内置页面
+        navigate_actions = [a for a in actions if a.type == ActionType.NAVIGATE]
+        if not navigate_actions:
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback="未检测到浏览器打开操作 (navigate)"
+            )
+
+        page_url_matched = False
+        for nav in navigate_actions:
+            if nav.url and f"exam-page/{self.page_id}" in nav.url:
+                page_url_matched = True
+                break
+
+        if not page_url_matched:
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback=f"未导航到内置页面 /exam-page/{self.page_id}"
+            )
+
+        # 2. 检查必需的操作序列
+        if self.required_operations:
+            op_checks = []
+            for req_op in self.required_operations:
+                req_type = req_op.get("type", "")
+                selector_hint = req_op.get("selector_contains", "").lower()
+                value_hint = req_op.get("value_contains", "").lower()
+
+                found = False
+                for a in actions:
+                    action_type = a.type.value if hasattr(a.type, 'value') else str(a.type)
+                    if action_type == req_type:
+                        if selector_hint and a.selector and selector_hint in a.selector.lower():
+                            found = True
+                            break
+                        if value_hint and a.value and value_hint in a.value.lower():
+                            found = True
+                            break
+                        if not selector_hint and not value_hint:
+                            found = True
+                            break
+
+                op_checks.append({"op": req_op, "found": found})
+
+            matched_count = sum(1 for c in op_checks if c["found"])
+            if matched_count < len(self.required_operations):
+                missing = [c["op"] for c in op_checks if not c["found"]]
+                return ValidationResult(
+                    correct=False,
+                    score=0,
+                    max_score=self.max_score,
+                    feedback=f"缺少必要的操作步骤 (完成 {matched_count}/{len(self.required_operations)})",
+                    details={"missing_operations": missing}
+                )
+
+        # 3. 检查答案
+        if not answer or not answer.strip():
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback="未提交答案"
+            )
+
+        if answer.strip().lower() != self.expected_answer.strip().lower():
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback="答案不正确",
+                details={"expected": self.expected_answer, "got": answer.strip()}
+            )
+
+        return ValidationResult(
+            correct=True,
+            score=self.max_score,
+            max_score=self.max_score,
+            feedback=f"✓ 正确！成功完成了内置页面 {self.page_id} 的操作任务"
+        )
+
+    def get_score(self) -> Tuple[int, int]:
+        return (self.max_score, self.max_score)
+
+    def get_config(self) -> Dict[str, Any]:
+        return {
+            "type": "BuiltInPageValidator",
+            "page_id": self.page_id,
+            "max_score": self.max_score,
+        }

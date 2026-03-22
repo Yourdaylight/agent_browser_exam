@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Documentation</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:20px}
+.header{margin-bottom:20px}
+.header h1{font-size:20px;color:#58a6ff}
+.header p{font-size:13px;color:#8b949e;margin-top:4px}
+.tabs{display:flex;gap:0;border-bottom:2px solid #21262d;margin-bottom:20px}
+.tab{padding:10px 20px;background:transparent;border:none;color:#8b949e;font-size:14px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s}
+.tab:hover{color:#c9d1d9}
+.tab.active{color:#58a6ff;border-bottom-color:#58a6ff;font-weight:600}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px}
+.stat-card{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:16px}
+.stat-card .label{font-size:12px;color:#8b949e;margin-bottom:4px}
+.stat-card .value{font-size:24px;font-weight:700}
+.stat-card .value.green{color:#3fb950}.stat-card .value.yellow{color:#d29922}.stat-card .value.red{color:#f85149}.stat-card .value.blue{color:#58a6ff}
+.section{margin-bottom:20px}
+.section h3{font-size:15px;color:#e6edf3;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #21262d}
+.vuln-table{width:100%;border-collapse:collapse}
+.vuln-table th{background:#161b22;color:#8b949e;font-size:12px;text-align:left;padding:8px 12px;border-bottom:1px solid #30363d}
+.vuln-table td{padding:8px 12px;border-bottom:1px solid #21262d;font-size:13px}
+.severity{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.sev-critical{background:#3a1a1a;color:#f85149}
+.sev-high{background:#3a2a1a;color:#d29922}
+.sev-medium{background:#1a3a2a;color:#3fb950}
+.sev-low{background:#1a2a3a;color:#58a6ff}
+.metric-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #21262d;font-size:13px}
+.metric-row .label{color:#8b949e}
+.preview-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(13,17,23,0.85);z-index:9999;align-items:center;justify-content:center;flex-direction:column}
+.preview-overlay h2{color:#d29922;font-size:18px;margin-bottom:8px}
+.preview-overlay p{color:#8b949e;font-size:14px}
+body.preview-mode .tab{pointer-events:none;opacity:0.6}
+</style>
+</head>
+<body>
+<div class="header">
+<h1>System Documentation</h1>
+<p>Internal knowledge base - Switch tabs to find information</p>
+</div>
+<div class="tabs">
+<button class="tab active" onclick="switchTab('overview')">Overview</button>
+<button class="tab" onclick="switchTab('performance')">Performance</button>
+<button class="tab" onclick="switchTab('security')">Security</button>
+<button class="tab" onclick="switchTab('network')">Network</button>
+<button class="tab" onclick="switchTab('logs')">Logs</button>
+</div>
+<!-- Overview -->
+<div class="tab-content active" id="tab-overview">
+<div class="stat-grid">
+<div class="stat-card"><div class="label">Total Services</div><div class="value blue">24</div></div>
+<div class="stat-card"><div class="label">Active Users</div><div class="value green">12,847</div></div>
+<div class="stat-card"><div class="label">Uptime</div><div class="value green">99.97%</div></div>
+<div class="stat-card"><div class="label">Deployments (30d)</div><div class="value blue">156</div></div>
+</div>
+<div class="section"><h3>System Architecture</h3><p style="font-size:13px;line-height:1.8;color:#8b949e">The platform consists of 24 microservices deployed across 3 regions (US, EU, AP). Traffic is managed through a global CDN with automatic failover. The primary database cluster uses PostgreSQL 15 with read replicas in each region. Redis caching layer handles 85% of read requests. Message queue (RabbitMQ) processes async jobs including email notifications, report generation, and data aggregation.</p></div>
+</div>
+<!-- Performance -->
+<div class="tab-content" id="tab-performance">
+<div class="stat-grid">
+<div class="stat-card"><div class="label">Avg Response Time</div><div class="value green">142ms</div></div>
+<div class="stat-card"><div class="label">P99 Latency</div><div class="value yellow">380ms</div></div>
+<div class="stat-card"><div class="label">Throughput</div><div class="value blue">8,420 rps</div></div>
+<div class="stat-card"><div class="label">Error Rate</div><div class="value green">0.03%</div></div>
+</div>
+<div class="section"><h3>Service Performance</h3>
+<div class="metric-row"><span class="label">API Gateway</span><span>89ms avg</span></div>
+<div class="metric-row"><span class="label">Auth Service</span><span>45ms avg</span></div>
+<div class="metric-row"><span class="label">Payment Service</span><span>230ms avg</span></div>
+<div class="metric-row"><span class="label">Search Service</span><span>180ms avg</span></div>
+<div class="metric-row"><span class="label">Notification Service</span><span>65ms avg</span></div>
+</div>
+</div>
+<!-- Security -->
+<div class="tab-content" id="tab-security">
+<div class="stat-grid">
+<div class="stat-card"><div class="label">Open Vulnerabilities</div><div class="value red">7</div></div>
+<div class="stat-card"><div class="label">Critical</div><div class="value red">3</div></div>
+<div class="stat-card"><div class="label">High</div><div class="value yellow">2</div></div>
+<div class="stat-card"><div class="label">Patched (30d)</div><div class="value green">23</div></div>
+</div>
+<div class="section"><h3>Vulnerability Report</h3>
+<table class="vuln-table">
+<thead><tr><th>ID</th><th>Severity</th><th>Component</th><th>Description</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>VULN-001</td><td><span class="severity sev-critical">Critical</span></td><td>auth-service</td><td>SQL injection in login endpoint</td><td style="color:#f85149">Open</td></tr>
+<tr><td>VULN-002</td><td><span class="severity sev-critical">Critical</span></td><td>api-gateway</td><td>Broken authentication token validation</td><td style="color:#f85149">Open</td></tr>
+<tr><td>VULN-003</td><td><span class="severity sev-critical">Critical</span></td><td>payment-service</td><td>Credit card data exposure in logs</td><td style="color:#f85149">Open</td></tr>
+<tr><td>VULN-004</td><td><span class="severity sev-high">High</span></td><td>user-service</td><td>XSS in user profile display</td><td style="color:#d29922">In Progress</td></tr>
+<tr><td>VULN-005</td><td><span class="severity sev-high">High</span></td><td>file-service</td><td>Path traversal in file download</td><td style="color:#d29922">In Progress</td></tr>
+<tr><td>VULN-006</td><td><span class="severity sev-medium">Medium</span></td><td>cache-service</td><td>Cache poisoning via header injection</td><td style="color:#3fb950">Patched</td></tr>
+<tr><td>VULN-007</td><td><span class="severity sev-low">Low</span></td><td>logging-service</td><td>Information disclosure in error messages</td><td style="color:#3fb950">Patched</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Network -->
+<div class="tab-content" id="tab-network">
+<div class="stat-grid">
+<div class="stat-card"><div class="label">Inbound Traffic</div><div class="value blue">2.4 Gbps</div></div>
+<div class="stat-card"><div class="label">Outbound Traffic</div><div class="value blue">1.8 Gbps</div></div>
+<div class="stat-card"><div class="label">CDN Hit Rate</div><div class="value green">94.2%</div></div>
+<div class="stat-card"><div class="label">DNS Queries/s</div><div class="value blue">15,230</div></div>
+</div>
+<div class="section"><h3>Network Topology</h3><p style="font-size:13px;line-height:1.8;color:#8b949e">Traffic enters through CloudFlare CDN with DDoS protection. Global load balancer distributes requests to regional edge nodes. Internal traffic uses service mesh (Istio) with mTLS between all services. VPN gateway provides secure access for operational management.</p></div>
+</div>
+<!-- Logs -->
+<div class="tab-content" id="tab-logs">
+<div class="stat-grid">
+<div class="stat-card"><div class="label">Logs (24h)</div><div class="value blue">4.2M</div></div>
+<div class="stat-card"><div class="label">Error Logs</div><div class="value red">12,450</div></div>
+<div class="stat-card"><div class="label">Warning Logs</div><div class="value yellow">89,320</div></div>
+<div class="stat-card"><div class="label">Info Logs</div><div class="value green">4.1M</div></div>
+</div>
+<div class="section"><h3>Recent Errors (Top 5)</h3>
+<div class="metric-row"><span class="label">Connection timeout to database replica-3</span><span style="color:#f85149">847 times</span></div>
+<div class="metric-row"><span class="label">SSL certificate renewal failed for cdn.example.com</span><span style="color:#d29922">12 times</span></div>
+<div class="metric-row"><span class="label">Rate limit exceeded for IP 203.0.113.42</span><span style="color:#d29922">3,241 times</span></div>
+<div class="metric-row"><span class="label">Disk space warning on backup-server-02</span><span style="color:#d29922">5 times</span></div>
+<div class="metric-row"><span class="label">Memory threshold exceeded on worker-07</span><span style="color:#d29922">23 times</span></div>
+</div>
+</div>
+<div class="preview-overlay" id="previewOverlay"><h2>Preview Mode</h2><p>This is an Agent exam page. Interaction disabled for preview.</p></div>
+<script>
+const params=new URLSearchParams(window.location.search);
+const isPreview=params.get('preview')==='1';
+if(isPreview){document.body.classList.add('preview-mode');document.getElementById('previewOverlay').style.display='flex'}
+function switchTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');event.target.classList.add('active')}
+try{fetch('/api/exam-page/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page_id:'tabs',event:'visit'})}).catch(()=>{})}catch(e){}
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 // State
 const state = {
-    apiUrl: 'http://localhost:8080',
+    apiUrl: window.location.origin,  // 动态获取，部署无需改代码
     examToken: null,
     currentLevel: 'v1',
     selectedAgent: 'browser-use',

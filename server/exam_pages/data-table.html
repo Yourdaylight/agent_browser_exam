@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>服务器监控 - 数据表格</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:20px}
+.header{margin-bottom:20px}
+.header h1{font-size:20px;color:#58a6ff}
+.header p{font-size:13px;color:#8b949e;margin-top:4px}
+.table-container{overflow-x:auto;border:1px solid #30363d;border-radius:6px}
+table{width:100%;border-collapse:collapse}
+th{background:#161b22;color:#8b949e;font-size:12px;font-weight:600;text-align:left;padding:10px 12px;border-bottom:1px solid #30363d;cursor:pointer;user-select:none}
+th:hover{color:#c9d1d9}
+th .sort-icon{margin-left:4px;font-size:10px;color:#484f58}
+td{padding:8px 12px;border-bottom:1px solid #21262d;font-size:13px}
+tr:hover{background:#161b22}
+.status-badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.status-ok{background:#1a3a2a;color:#3fb950}
+.status-warn{background:#3a2a1a;color:#d29922}
+.status-error{background:#3a1a1a;color:#f85149}
+.pagination{display:flex;align-items:center;justify-content:space-between;margin-top:16px;padding:12px 0}
+.pagination button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:13px;margin:0 2px}
+.pagination button:hover:not(:disabled){background:#30363d;border-color:#58a6ff}
+.pagination button:disabled{opacity:.4;cursor:not-allowed}
+.pagination .page-info{color:#8b949e;font-size:13px}
+.preview-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(13,17,23,0.85);z-index:9999;align-items:center;justify-content:center;flex-direction:column}
+.preview-overlay h2{color:#d29922;font-size:18px;margin-bottom:8px}
+.preview-overlay p{color:#8b949e;font-size:14px}
+body.preview-mode .pagination button{pointer-events:none;opacity:0.5}
+body.preview-mode th{cursor:default}
+</style>
+</head>
+<body>
+<div class="header">
+<h1>Server Monitor</h1>
+<p>服务器集群实时监控数据 | 共 50 台服务器</p>
+</div>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>IP Address</th>
+<th>Hostname</th>
+<th>CPU Usage</th>
+<th>Memory</th>
+<th>Disk Usage</th>
+<th>Status</th>
+<th>Region</th>
+<th>Uptime (days)</th>
+</tr>
+</thead>
+<tbody id="tableBody"></tbody>
+</table>
+</div>
+<div class="pagination">
+<div class="page-info" id="pageInfo"></div>
+<div id="pageButtons"></div>
+</div>
+<div class="preview-overlay" id="previewOverlay">
+<h2>Preview Mode</h2>
+<p>This is an Agent exam page. Interaction disabled for preview.</p>
+</div>
+<script>
+const PAGE_SIZE=10;
+let currentPage=1;
+const servers=[
+{ip:"10.0.1.1",host:"web-prod-01",cpu:"45.2%",mem:"62%",disk:"71%",status:"ok",region:"us-east",up:142},
+{ip:"10.0.1.2",host:"web-prod-02",cpu:"52.8%",mem:"58%",disk:"65%",status:"ok",region:"us-east",up:142},
+{ip:"10.0.1.3",host:"api-prod-01",cpu:"67.1%",mem:"74%",disk:"82%",status:"warn",region:"us-east",up:98},
+{ip:"10.0.1.4",host:"api-prod-02",cpu:"33.5%",mem:"45%",disk:"55%",status:"ok",region:"us-west",up:201},
+{ip:"10.0.1.5",host:"db-primary",cpu:"89.2%",mem:"91%",disk:"88%",status:"error",region:"us-west",up:56},
+{ip:"10.0.1.6",host:"db-replica-01",cpu:"72.4%",mem:"68%",disk:"76%",status:"warn",region:"us-west",up:56},
+{ip:"10.0.1.7",host:"cache-01",cpu:"22.1%",mem:"81%",disk:"34%",status:"ok",region:"eu-west",up:310},
+{ip:"10.0.1.8",host:"cache-02",cpu:"18.9%",mem:"79%",disk:"33%",status:"ok",region:"eu-west",up:310},
+{ip:"10.0.1.9",host:"mq-broker-01",cpu:"41.3%",mem:"55%",disk:"44%",status:"ok",region:"eu-west",up:187},
+{ip:"10.0.1.10",host:"mq-broker-02",cpu:"39.7%",mem:"52%",disk:"42%",status:"ok",region:"ap-south",up:187},
+{ip:"10.0.2.1",host:"worker-01",cpu:"95.6%",mem:"94%",disk:"91%",status:"error",region:"ap-south",up:14},
+{ip:"10.0.2.2",host:"worker-02",cpu:"88.3%",mem:"87%",disk:"85%",status:"error",region:"ap-south",up:14},
+{ip:"10.0.2.3",host:"worker-03",cpu:"61.4%",mem:"63%",disk:"70%",status:"warn",region:"ap-east",up:89},
+{ip:"10.0.2.4",host:"worker-04",cpu:"55.2%",mem:"59%",disk:"68%",status:"ok",region:"ap-east",up:89},
+{ip:"10.0.2.5",host:"lb-prod-01",cpu:"28.6%",mem:"41%",disk:"38%",status:"ok",region:"us-east",up:250},
+{ip:"10.0.2.6",host:"lb-prod-02",cpu:"31.2%",mem:"43%",disk:"40%",status:"ok",region:"us-east",up:250},
+{ip:"10.0.2.7",host:"cdn-edge-01",cpu:"15.3%",mem:"32%",disk:"22%",status:"ok",region:"us-west",up:365},
+{ip:"10.0.2.8",host:"cdn-edge-02",cpu:"14.8%",mem:"30%",disk:"20%",status:"ok",region:"us-west",up:365},
+{ip:"10.0.2.9",host:"cdn-edge-03",cpu:"16.1%",mem:"33%",disk:"21%",status:"ok",region:"eu-west",up:365},
+{ip:"10.0.2.10",host:"cdn-edge-04",cpu:"13.9%",mem:"29%",disk:"19%",status:"ok",region:"eu-west",up:365},
+{ip:"10.0.3.1",host:"log-collector-01",cpu:"42.7%",mem:"56%",disk:"78%",status:"warn",region:"us-east",up:120},
+{ip:"10.0.3.2",host:"log-collector-02",cpu:"40.1%",mem:"54%",disk:"75%",status:"ok",region:"us-east",up:120},
+{ip:"10.0.3.3",host:"monitor-01",cpu:"35.6%",mem:"48%",disk:"52%",status:"ok",region:"us-west",up:200},
+{ip:"10.0.3.4",host:"monitor-02",cpu:"38.2%",mem:"50%",disk:"54%",status:"ok",region:"us-west",up:200},
+{ip:"10.0.3.5",host:"backup-01",cpu:"25.4%",mem:"67%",disk:"90%",status:"warn",region:"eu-west",up:180},
+{ip:"10.0.3.6",host:"backup-02",cpu:"23.8%",mem:"65%",disk:"87%",status:"ok",region:"eu-west",up:180},
+{ip:"10.0.3.7",host:"scheduler-01",cpu:"51.3%",mem:"62%",disk:"45%",status:"ok",region:"ap-south",up:95},
+{ip:"10.0.3.8",host:"scheduler-02",cpu:"48.7%",mem:"60%",disk:"43%",status:"ok",region:"ap-south",up:95},
+{ip:"10.0.3.9",host:"auth-service-01",cpu:"37.2%",mem:"44%",disk:"36%",status:"ok",region:"ap-east",up:150},
+{ip:"10.0.3.10",host:"auth-service-02",cpu:"35.8%",mem:"42%",disk:"34%",status:"ok",region:"ap-east",up:150},
+{ip:"10.0.4.1",host:"payment-01",cpu:"63.5%",mem:"71%",disk:"58%",status:"warn",region:"us-east",up:75},
+{ip:"10.0.4.2",host:"payment-02",cpu:"59.8%",mem:"69%",disk:"56%",status:"ok",region:"us-east",up:75},
+{ip:"10.0.4.3",host:"notification-01",cpu:"28.4%",mem:"38%",disk:"30%",status:"ok",region:"us-west",up:220},
+{ip:"10.0.4.4",host:"notification-02",cpu:"26.9%",mem:"36%",disk:"28%",status:"ok",region:"us-west",up:220},
+{ip:"10.0.4.5",host:"search-index-01",cpu:"74.2%",mem:"82%",disk:"71%",status:"warn",region:"eu-west",up:60},
+{ip:"10.0.4.6",host:"search-index-02",cpu:"71.8%",mem:"80%",disk:"69%",status:"warn",region:"eu-west",up:60},
+{ip:"10.0.4.7",host:"ml-inference-01",cpu:"92.1%",mem:"93%",disk:"45%",status:"error",region:"ap-south",up:30},
+{ip:"10.0.4.8",host:"ml-inference-02",cpu:"88.5%",mem:"89%",disk:"43%",status:"error",region:"ap-south",up:30},
+{ip:"10.0.4.9",host:"ml-training-01",cpu:"99.2%",mem:"97%",disk:"82%",status:"error",region:"ap-east",up:7},
+{ip:"10.0.4.10",host:"ml-training-02",cpu:"97.8%",mem:"96%",disk:"80%",status:"error",region:"ap-east",up:7},
+{ip:"10.0.5.1",host:"gateway-01",cpu:"34.6%",mem:"47%",disk:"32%",status:"ok",region:"us-east",up:290},
+{ip:"10.0.5.2",host:"gateway-02",cpu:"32.1%",mem:"45%",disk:"30%",status:"ok",region:"us-east",up:290},
+{ip:"10.0.5.3",host:"config-server-01",cpu:"18.4%",mem:"28%",disk:"25%",status:"ok",region:"us-west",up:340},
+{ip:"10.0.5.4",host:"registry-01",cpu:"21.7%",mem:"35%",disk:"42%",status:"ok",region:"us-west",up:340},
+{ip:"10.0.5.5",host:"audit-log-01",cpu:"56.3%",mem:"73%",disk:"86%",status:"warn",region:"eu-west",up:110},
+{ip:"10.0.5.6",host:"audit-log-02",cpu:"53.9%",mem:"70%",disk:"83%",status:"ok",region:"eu-west",up:110},
+{ip:"10.0.5.7",host:"ci-runner-01",cpu:"78.4%",mem:"85%",disk:"67%",status:"warn",region:"ap-south",up:45},
+{ip:"10.0.5.8",host:"ci-runner-02",cpu:"75.2%",mem:"83%",disk:"65%",status:"warn",region:"ap-south",up:45},
+{ip:"10.0.5.9",host:"artifact-store-01",cpu:"19.5%",mem:"31%",disk:"92%",status:"warn",region:"ap-east",up:160},
+{ip:"10.0.5.10",host:"artifact-store-02",cpu:"17.8%",mem:"29%",disk:"89%",status:"ok",region:"ap-east",up:160}
+];
+const params=new URLSearchParams(window.location.search);
+const isPreview=params.get('preview')==='1';
+if(isPreview){document.body.classList.add('preview-mode');document.getElementById('previewOverlay').style.display='flex'}
+function render(page){
+const start=(page-1)*PAGE_SIZE;
+const end=Math.min(start+PAGE_SIZE,servers.length);
+const slice=servers.slice(start,end);
+const tbody=document.getElementById('tableBody');
+tbody.innerHTML=slice.map(s=>`<tr>
+<td><code>${s.ip}</code></td><td>${s.host}</td><td>${s.cpu}</td><td>${s.mem}</td><td>${s.disk}</td>
+<td><span class="status-badge status-${s.status}">${s.status.toUpperCase()}</span></td>
+<td>${s.region}</td><td>${s.up}</td></tr>`).join('');
+document.getElementById('pageInfo').textContent=`Showing ${start+1}-${end} of ${servers.length}`;
+const totalPages=Math.ceil(servers.length/PAGE_SIZE);
+const btns=document.getElementById('pageButtons');
+btns.innerHTML='';
+const addBtn=(text,p,disabled)=>{
+const b=document.createElement('button');b.textContent=text;b.disabled=disabled;
+b.onclick=()=>{currentPage=p;render(p)};btns.appendChild(b);
+};
+addBtn('\u2190 Prev',page-1,page===1);
+for(let i=1;i<=totalPages;i++){const b=document.createElement('button');b.textContent=i;b.disabled=false;if(i===page)b.style.background='#1f6feb';b.onclick=()=>{currentPage=i;render(i)};btns.appendChild(b)}
+addBtn('Next \u2192',page+1,page===totalPages);
+}
+render(1);
+try{fetch('/api/exam-page/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page_id:'data-table',event:'visit'})}).catch(()=>{})}catch(e){}
+</script>
+</body>
+</html>

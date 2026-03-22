@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShopHub - Product Catalog</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:20px}
+.header{margin-bottom:20px}
+.header h1{font-size:20px;color:#58a6ff}
+.header p{font-size:13px;color:#8b949e;margin-top:4px}
+.controls{display:flex;gap:12px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
+.controls label{font-size:13px;color:#8b949e}
+.controls select,.controls button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 12px;border-radius:4px;font-size:13px;cursor:pointer}
+.controls select:hover,.controls button:hover{border-color:#58a6ff}
+.controls button{background:#1f6feb;border-color:#1f6feb;color:#fff}
+.controls button:hover{background:#388bfd}
+.controls .sort-indicator{font-size:12px;color:#d29922;margin-left:8px}
+.product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.product-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;transition:border-color .2s}
+.product-card:hover{border-color:#484f58}
+.product-card .name{font-size:15px;font-weight:600;color:#e6edf3;margin-bottom:4px}
+.product-card .category{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;background:#1f2937;color:#8b949e;margin-bottom:8px}
+.product-card .price{font-size:20px;font-weight:700;color:#3fb950}
+.product-card .price .currency{font-size:13px;font-weight:400;color:#8b949e}
+.product-card .rating{margin-top:6px;font-size:12px;color:#d29922}
+.product-card .stock{margin-top:4px;font-size:12px}
+.stock-ok{color:#3fb950}.stock-low{color:#d29922}.stock-out{color:#f85149}
+.preview-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(13,17,23,0.85);z-index:9999;align-items:center;justify-content:center;flex-direction:column}
+.preview-overlay h2{color:#d29922;font-size:18px;margin-bottom:8px}
+.preview-overlay p{color:#8b949e;font-size:14px}
+body.preview-mode select,body.preview-mode button{pointer-events:none;opacity:0.5}
+</style>
+</head>
+<body>
+<div class="header">
+<h1>ShopHub</h1>
+<p>Product Catalog | Find the most expensive Electronics product</p>
+</div>
+<div class="controls">
+<label>Sort by:</label>
+<select id="sortSelect" onchange="applySort()">
+<option value="default">Default</option>
+<option value="price-asc">Price: Low to High</option>
+<option value="price-desc">Price: High to Low</option>
+<option value="rating-desc">Rating: Best First</option>
+<option value="name-asc">Name: A-Z</option>
+</select>
+<button onclick="toggleSortDir()" id="sortDirBtn">Sort Direction: Default</button>
+<span class="sort-indicator" id="sortIndicator"></span>
+<label style="margin-left:16px">Category:</label>
+<select id="categoryFilter" onchange="applyFilter()">
+<option value="all">All Categories</option>
+<option value="Electronics">Electronics</option>
+<option value="Clothing">Clothing</option>
+<option value="Home">Home & Kitchen</option>
+<option value="Books">Books</option>
+<option value="Sports">Sports</option>
+</select>
+</div>
+<div class="product-grid" id="productGrid"></div>
+<div class="preview-overlay" id="previewOverlay">
+<h2>Preview Mode</h2>
+<p>This is an Agent exam page. Interaction disabled for preview.</p>
+</div>
+<script>
+const products=[
+{name:"Wireless Bluetooth Headphones",category:"Electronics",price:89.99,rating:4.5,stock:145},
+{name:"Mechanical Keyboard RGB",category:"Electronics",price:129.99,rating:4.7,stock:78},
+{name:"4K Ultra HD Monitor 27\"",category:"Electronics",price:349.99,rating:4.8,stock:32},
+{name:"USB-C Docking Station",category:"Electronics",price:74.99,rating:4.3,stock:210},
+{name:"Smart Home Speaker",category:"Electronics",price:199.99,rating:4.6,stock:56},
+{name:"Portable SSD 2TB",category:"Electronics",price:159.99,rating:4.9,stock:89},
+{name:"Webcam 1080p HD",category:"Electronics",price:59.99,rating:4.2,stock:312},
+{name:"Gaming Mouse Wireless",category:"Electronics",price:69.99,rating:4.4,stock:167},
+{name:"Noise Cancelling Earbuds",category:"Electronics",price:149.99,rating:4.7,stock:43},
+{name:"ProMax Ultra Monitor",category:"Electronics",price:1299.99,rating:4.9,stock:8},
+{name:"Electric Standing Desk",category:"Home",price:459.99,rating:4.6,stock:25},
+{name:"Ergonomic Office Chair",category:"Home",price:389.99,rating:4.5,stock:37},
+{name:"LED Desk Lamp",category:"Home",price:34.99,rating:4.1,stock:445},
+{name:"Air Purifier HEPA",category:"Home",price:219.99,rating:4.4,stock:62},
+{name:"Smart Thermostat",category:"Home",price:179.99,rating:4.3,stock:51},
+{name:"Robot Vacuum Cleaner",category:"Home",price:549.99,rating:4.7,stock:18},
+{name:"Cotton Casual T-Shirt",category:"Clothing",price:24.99,rating:4.0,stock:890},
+{name:"Denim Jeans Slim Fit",category:"Clothing",price:49.99,rating:4.2,stock:345},
+{name:"Winter Down Jacket",category:"Clothing",price:189.99,rating:4.6,stock:67},
+{name:"Running Shoes Lightweight",category:"Sports",price:99.99,rating:4.5,stock:178},
+{name:"Yoga Mat Premium",category:"Sports",price:39.99,rating:4.3,stock:256},
+{name:"Resistance Bands Set",category:"Sports",price:19.99,rating:4.1,stock:520},
+{name:"Dumbbell Set 50lbs",category:"Sports",price:149.99,rating:4.4,stock:42},
+{name:"Python Programming Guide",category:"Books",price:44.99,rating:4.8,stock:230},
+{name:"Data Science Handbook",category:"Books",price:59.99,rating:4.7,stock:156},
+{name:"AI for Beginners",category:"Books",price:29.99,rating:4.5,stock:340},
+{name:"Mechanical Keyboard TKL",category:"Electronics",price:99.99,rating:4.6,stock:112},
+{name:"Wireless Charging Pad",category:"Electronics",price:29.99,rating:4.0,stock:678},
+{name:"Smart Watch Fitness",category:"Electronics",price:249.99,rating:4.5,stock:34},
+{name:"Bamboo Cutting Board",category:"Home",price:29.99,rating:4.2,stock:389},
+{name:"Stainless Steel Water Bottle",category:"Sports",price:24.99,rating:4.4,stock:567},
+{name:"Bluetooth Speaker Mini",category:"Electronics",price:39.99,rating:4.3,stock:289}
+];
+let currentSort='default';let currentCategory='all';
+const params=new URLSearchParams(window.location.search);
+const isPreview=params.get('preview')==='1';
+if(isPreview){document.body.classList.add('preview-mode');document.getElementById('previewOverlay').style.display='flex'}
+function applySort(){currentSort=document.getElementById('sortSelect').value;render()}
+function toggleSortDir(){const sel=document.getElementById('sortSelect');if(currentSort==='price-desc'){sel.value='price-asc'}else{sel.value='price-desc'}applySort()}
+function applyFilter(){currentCategory=document.getElementById('categoryFilter').value;render()}
+function getFiltered(){let list=[...products];if(currentCategory!=='all')list=list.filter(p=>p.category===currentCategory);if(currentSort==='price-asc')list.sort((a,b)=>a.price-b.price);else if(currentSort==='price-desc')list.sort((a,b)=>b.price-a.price);else if(currentSort==='rating-desc')list.sort((a,b)=>b.rating-a.rating);else if(currentSort==='name-asc')list.sort((a,b)=>a.name.localeCompare(b.name));return list}
+function render(){const list=getFiltered();const grid=document.getElementById('productGrid');const sortLabel=currentSort==='default'?'Default':currentSort.replace('-',' ').replace(/asc|desc/,m=>m==='asc'?'Low to High':'High to Low');document.getElementById('sortIndicator').textContent=currentSort!=='default'?`Sorted: ${sortLabel}`:'';grid.innerHTML=list.map(p=>{const stockClass=p.stock>50?'stock-ok':p.stock>10?'stock-low':'stock-out';const stockText=p.stock>0?`${p.stock} in stock`:'Out of stock';return`<div class="product-card"><div class="name">${p.name}</div><span class="category">${p.category}</span><div class="price"><span class="currency">$</span>${p.price.toFixed(2)}</div><div class="rating">${'\u2605'.repeat(Math.floor(p.rating))}${'\u2606'.repeat(5-Math.floor(p.rating))} ${p.rating}</div><div class="stock ${stockClass}">${stockText}</div></div>`}).join('')}
+render();
+try{fetch('/api/exam-page/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page_id:'products',event:'visit'})}).catch(()=>{})}catch(e){}
+</script>
+</body>
+</html>
