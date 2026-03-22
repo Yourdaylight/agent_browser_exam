@@ -67,7 +67,6 @@ class Storage:
 
             CREATE INDEX IF NOT EXISTS idx_leaderboard_level ON leaderboard(level);
             CREATE INDEX IF NOT EXISTS idx_sessions_created ON exam_sessions(created_at);
-            CREATE INDEX IF NOT EXISTS idx_sessions_fingerprint ON exam_sessions(device_fingerprint);
         """)
 
         # 兼容迁移：为旧表添加 device_fingerprint 列
@@ -77,6 +76,14 @@ class Storage:
             )
         except sqlite3.OperationalError:
             pass  # 列已存在
+
+        # 指纹索引（在列确认存在后创建）
+        try:
+            self._get_conn().execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_fingerprint ON exam_sessions(device_fingerprint)"
+            )
+        except sqlite3.OperationalError:
+            pass  # 索引已存在或列不存在
 
     # ---- Exam Session ----
 
