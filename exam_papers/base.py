@@ -231,14 +231,14 @@ L2_TASKS = [
 1. 打开浏览器，访问考试服务器的内置页面: {base_url}/exam-page/data-table
 2. 这是一个服务器监控数据表格，共 50 条记录，每页 10 条，共 5 页
 3. 翻到第 3 页（需要点击"下一页"按钮或页码"3"）
-4. 在第 3 页中找到 IP 地址为 10.0.2.15 的服务器
+4. 在第 3 页中找到 IP 地址为 10.0.3.5 的服务器
 5. 提取该服务器的 CPU 使用率（CPU Usage 列）
 6. 提交提取到的 CPU 使用率
 
 【注意】目标数据只在第 3 页出现，你必须真正执行翻页操作。""",
         validator=BuiltInPageValidator(
             page_id="data-table",
-            expected_answer="78.3%",
+            expected_answer="25.4%",
             required_operations=[
                 {"type": "navigate"},
                 {"type": "click"},
@@ -250,7 +250,7 @@ L2_TASKS = [
         hints=[
             "先 page.goto() 访问 /exam-page/data-table",
             "需要点击'下一页'按钮翻到第 3 页",
-            "目标服务器 IP 是 10.0.2.15",
+            "目标服务器 IP 是 10.0.3.5",
             "在表格中找到该行后，提取 CPU Usage 列的值"
         ]
     ),
