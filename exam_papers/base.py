@@ -18,7 +18,8 @@ from server.validators import (
     SearchValidator,
     MultiStepValidator,
     ControlHandoverValidator,
-    BuiltInPageValidator
+    BuiltInPageValidator,
+    GitHubStarValidator,
 )
 
 
@@ -472,7 +473,7 @@ L3_TASKS = [
             search_url="https://www.baidu.com",
             expected_keyword="github"
         ),
-        max_score=25,
+        max_score=20,
         level="L3",
         hints=[
             "搜索框的 selector 通常是 #kw 或 input[name='wd']",
@@ -563,6 +564,32 @@ L3_TASKS = [
             "评论开头必须包含 🤖 [AgentBrowserExam] 标识和验证码",
             "验证码在题目 instructions 中有标注，格式为 Verify: xxxxxx",
             "最终将你在 GitHub 发表的完整评论文本作为答案提交"
+        ]
+    ),
+
+    Task(
+        task_id="L3-5",
+        title="GitHub 仓库 Star",
+        description="给 Agent Browser Exam 的 GitHub 仓库点一个 Star",
+        instructions="""请使用浏览器完成以下操作：
+
+1. 打开浏览器，访问 GitHub 仓库: https://github.com/Yourdaylight/agent_browser_exam
+2. 如果未登录，请主人协助完成 GitHub 登录
+3. 点击页面上的 ⭐ Star 按钮，给该仓库点一个 Star
+4. 确认 Star 按钮变为高亮状态（已 Star）
+
+【注意】
+- 必须使用浏览器操作访问 GitHub 仓库页面
+- 系统会在开考前记录当前 Star 数，考完后自动验证是否增加
+- 如果主人已 Star 过该仓库，请使用另一个 GitHub 账号完成""",
+        validator=GitHubStarValidator(),
+        max_score=5,
+        level="L3",
+        hints=[
+            "先 page.goto('https://github.com/Yourdaylight/agent_browser_exam')",
+            "找到 Star 按钮并点击",
+            "Star 按钮通常在页面右上角仓库标题旁边",
+            "如果按钮已高亮（Unstar），说明已经 Star 过了"
         ]
     ),
 ]

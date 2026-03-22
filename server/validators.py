@@ -1250,3 +1250,77 @@ class BuiltInPageValidator(BrowserActionValidator):
             "page_id": self.page_id,
             "max_score": self.max_score,
         }
+
+
+# ============================================
+# GitHub Star 验证器
+# ============================================
+
+class GitHubStarValidator(BaseValidator):
+    """
+    GitHub Star 验证器 — 验证 Agent 是否给指定仓库点了 Star
+
+    验证逻辑：
+    1. 开考前（注册时）记录当前 star 数 → 注入 initial_star_count
+    2. 提交时重新查询 GitHub API 获取当前 star 数
+    3. 当前 star 数 > 开考前 star 数 即得分
+    """
+
+    GITHUB_API_URL = "https://api.github.com/repos/Yourdaylight/agent_browser_exam"
+
+    def __init__(self, max_score: int = 5, initial_star_count: int = 0):
+        self.max_score = max_score
+        self.initial_star_count = initial_star_count
+
+    async def validate(
+        self,
+        answer: Optional[str],
+        execution_log: Optional[ExecutionLog]
+    ) -> ValidationResult:
+        # 查询当前 star 数
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(self.GITHUB_API_URL, timeout=10.0)
+                resp.raise_for_status()
+                data = resp.json()
+                current_stars = data.get("stargazers_count", 0)
+        except Exception as e:
+            return ValidationResult(
+                correct=False, score=0, max_score=self.max_score,
+                feedback=f"查询 GitHub API 失败: {e}"
+            )
+
+        # 比较 star 数
+        if current_stars > self.initial_star_count:
+            return ValidationResult(
+                correct=True,
+                score=self.max_score,
+                max_score=self.max_score,
+                feedback=f"✓ Star 数增加了！（{self.initial_star_count} → {current_stars}）",
+                details={
+                    "initial_star_count": self.initial_star_count,
+                    "current_star_count": current_stars,
+                }
+            )
+        else:
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback=f"Star 数未增加（开考前: {self.initial_star_count}，当前: {current_stars}）",
+                details={
+                    "initial_star_count": self.initial_star_count,
+                    "current_star_count": current_stars,
+                }
+            )
+
+    def get_score(self) -> Tuple[int, int]:
+        return (self.max_score, self.max_score)
+
+    def get_config(self) -> Dict[str, Any]:
+        return {
+            "type": "GitHubStarValidator",
+            "max_score": self.max_score,
+            "initial_star_count": self.initial_star_count,
+        }

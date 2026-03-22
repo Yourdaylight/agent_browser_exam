@@ -29,7 +29,8 @@ from .validators import (
     ClickElementValidator, TypeAndSubmitValidator, WaitForContentValidator,
     LoopDetectionValidator, RefMapCacheValidator, ErrorTranslationValidator,
     OnDemandSnapshotValidator, ControlHandoverValidator,
-    SearchValidator, MultiStepValidator, BuiltInPageValidator
+    SearchValidator, MultiStepValidator, BuiltInPageValidator,
+    GitHubStarValidator,
 )
 from .security import (
     security_manager, get_client_ip, verify_request,
@@ -78,6 +79,11 @@ def create_validator(validator_config: Dict) -> Optional[Any]:
             expected_answer=expected,
             required_operations=validator_config.get("required_operations", []),
             max_score=validator_config.get("max_score", 15),
+        )
+    elif validator_type == "GitHubStarValidator":
+        return GitHubStarValidator(
+            max_score=validator_config.get("max_score", 5),
+            initial_star_count=validator_config.get("initial_star_count", 0),
         )
 
     return None
@@ -496,6 +502,24 @@ async def register(request: Request, data: RegisterRequest):
             # 将 challenge_code 写入 validator_config，供验证器使用
             if task.get("validator_config"):
                 task["validator_config"]["challenge_code"] = challenge_code
+            break
+
+    # 为 L3-5（GitHub Star）注入开考前 star 数
+    for task in tasks:
+        if task.get("id") == "L3-5":
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        "https://api.github.com/repos/Yourdaylight/agent_browser_exam",
+                        timeout=10.0
+                    )
+                    resp.raise_for_status()
+                    star_count = resp.json().get("stargazers_count", 0)
+                if task.get("validator_config"):
+                    task["validator_config"]["initial_star_count"] = star_count
+            except Exception:
+                pass  # star 数获取失败不影响注册
             break
 
     # 按级别设置差异化超时时间
