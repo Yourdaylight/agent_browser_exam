@@ -93,6 +93,7 @@ class ExamSession(BaseModel):
     results: Dict[str, TaskResult] = Field(default_factory=dict)
     current_task_index: int = 0
     completed: bool = False
+    timeout_minutes: int = 30
 
 
 class ExamScore(BaseModel):

@@ -532,7 +532,9 @@ L3_TASKS = [
         task_id="L3-4",
         title="GitHub Issue 阅读与评论",
         description="用浏览器访问 GitHub Issue，阅读内容并发表包含验证码的结构化评论",
-        instructions="""请使用浏览器自动化工具完成以下操作：
+        instructions="""【⚠️ 主人在旁提示】本题需要在 GitHub 上登录并发表评论，涉及账号身份校验。请确认主人在旁边，必要时由主人协助完成登录操作。
+
+请使用浏览器自动化工具完成以下操作：
 
 1. 打开浏览器，访问 GitHub Issue: https://github.com/Yourdaylight/agent_browser_exam/issues/1
 2. 仔细阅读 Issue 的标题和描述内容

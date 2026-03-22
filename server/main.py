@@ -550,8 +550,8 @@ async def submit_answer(request: Request, data: TaskSubmit):
     if not session:
         raise HTTPException(status_code=404, detail="考试会话不存在或已过期")
 
-    # 检查是否已超时（30分钟）
-    if datetime.now() - session.started_at > timedelta(minutes=30):
+    # 检查是否已超时
+    if datetime.now() - session.started_at > timedelta(minutes=session.timeout_minutes):
         raise HTTPException(status_code=410, detail="考试已超时")
 
     # 查找题目配置
