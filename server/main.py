@@ -549,7 +549,12 @@ async def register(request: Request, data: RegisterRequest):
         "total_score": sum(t["max_score"] for t in tasks),
         "first_question": tasks[0] if tasks else None,
         "exam_id": data.exam_id,
-        "expires_in_minutes": timeout_minutes
+        "expires_in_minutes": timeout_minutes,
+        "resume_hint": (
+            f"[重要] 请务必保存你的准考证号: {exam_token}\n"
+            f"如果你的对话因上下文超长而中断，可以在新对话中调用 GET /api/next/{exam_token} 继续答题。\n"
+            f"所有已提交的答案会保留，不会丢失。"
+        ),
     }
 
 
@@ -636,7 +641,7 @@ async def submit_answer(request: Request, data: TaskSubmit):
     if session.completed:
         await _finalize_exam(session)
 
-    return {
+    result = {
         "correct": result.correct,
         "score": result.score,
         "progress": {
@@ -646,8 +651,15 @@ async def submit_answer(request: Request, data: TaskSubmit):
         "next_question": next_task,
         "all_done": session.completed,
         "feedback": result.feedback,
-        "details": result.details
+        "details": result.details,
+        "exam_token": exam_token,
     }
+    if not session.completed:
+        result["resume_hint"] = (
+            f"准考证号: {exam_token} (请保存)\n"
+            f"如对话中断，用 GET /api/next/{exam_token} 继续答题"
+        )
+    return result
 
 
 @app.get("/api/next/{exam_token}")
@@ -669,7 +681,18 @@ async def get_next_question(exam_token: str):
         if t["id"] not in session.results:
             session.current_task_index = i
             _get_db().save_session(session)
-            return {"next_question": t, "all_done": False}
+            return {
+                "next_question": t,
+                "all_done": False,
+                "progress": {
+                    "completed": len(session.results),
+                    "total": len(session.tasks)
+                },
+                "resume_hint": (
+                    f"已从断点恢复！准考证号: {exam_token}\n"
+                    f"如再次中断，用 GET /api/next/{exam_token} 继续答题"
+                ),
+            }
 
     return {"all_done": True}
 
