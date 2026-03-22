@@ -153,8 +153,11 @@ class BrowserActionValidator(BaseValidator):
                 )
 
         # ========== 检查内容提取（答案验证）============
+        # 采用关键词包含匹配：答案包含 expected 或 expected 包含答案均可
         if self.expected_content and answer:
-            if self.expected_content.lower() != answer.lower():
+            expected_lower = self.expected_content.lower().strip()
+            answer_lower = answer.lower().strip()
+            if expected_lower not in answer_lower and answer_lower not in expected_lower:
                 return ValidationResult(
                     correct=False,
                     score=0,
@@ -706,7 +709,30 @@ class OnDemandSnapshotValidator(BrowserActionValidator):
 # ============================================
 
 class ControlHandoverValidator(BrowserActionValidator):
-    """L3-3: 控制权切换验证器"""
+    """
+    L3-3: 控制权转交验证器 — 人机协作场景
+
+    考察 Agent 在遇到需要人类操作的页面（如登录页）时，能否：
+    1. 访问目标页面（5分）
+    2. 对页面截图（5分）
+    3. 发出 control_handover action（5分）
+    4. 在 answer 中给主人清晰的操作说明（5分）
+    5. 完成后发出 control_resume action（5分）
+    """
+
+    # 用于检测"请求主人协助"的关键词
+    HANDOVER_KEYWORDS = [
+        "请", "扫码", "扫描", "二维码", "验证码", "手机号", "登录",
+        "输入", "主人", "用户", "人工", "协助", "帮忙", "操作",
+        "please", "scan", "qr", "login", "verify", "code", "manual",
+        "human", "user", "assist", "help",
+    ]
+
+    # 登录页面 URL 关键词
+    LOGIN_URL_PATTERNS = [
+        r"login", r"signin", r"sign-in", r"passport", r"auth",
+        r"sso", r"account", r"taobao\.com",
+    ]
 
     def __init__(self, max_score: int = 25):
         super().__init__(max_score=max_score)
@@ -716,50 +742,121 @@ class ControlHandoverValidator(BrowserActionValidator):
         answer: Optional[str],
         execution_log: Optional[ExecutionLog]
     ) -> ValidationResult:
-        if not execution_log:
-            return ValidationResult(
-                correct=False, score=0, max_score=self.max_score,
-                feedback="缺少执行日志"
-            )
+        score_breakdown = {
+            "page_visit": 0,          # 5分：访问目标页面
+            "screenshot": 0,          # 5分：对页面截图
+            "handover_action": 0,     # 5分：发出 control_handover
+            "handover_message": 0,    # 5分：answer 中有清晰说明
+            "resume_action": 0,       # 5分：发出 control_resume
+        }
+        feedback_parts = []
 
-        events = execution_log.events
-        actions = execution_log.actions
+        # 1. 检查是否访问了登录页面（5分）
+        if execution_log and execution_log.actions:
+            navigate_actions = [a for a in execution_log.actions if a.type == ActionType.NAVIGATE]
+            visited_login = False
+            for a in navigate_actions:
+                if a.url:
+                    for pattern in self.LOGIN_URL_PATTERNS:
+                        if re.search(pattern, a.url, re.IGNORECASE):
+                            visited_login = True
+                            break
+                if visited_login:
+                    break
 
-        handover_idx = None
-        resume_idx = None
-
-        for i, e in enumerate(events):
-            if e.get("type") == "control_handover":
-                handover_idx = i
-            elif e.get("type") == "control_resume":
-                resume_idx = i
-
-        has_user_action = any(
-            e.get("type") == "user_action" or a.type == ActionType.CLICK
-            for a in actions
-            for e in events
-        )
-
-        correct = (handover_idx is not None and resume_idx is not None)
-        partial_score = int(self.max_score * 0.5)
-        score = self.max_score if correct else (partial_score if handover_idx is not None else 0)
-
-        if correct:
-            feedback = "控制权切换序列完整：handover -> resume"
-        elif handover_idx is not None:
-            feedback = "触发了控制权切换，但未恢复"
+            if visited_login:
+                score_breakdown["page_visit"] = 5
+                feedback_parts.append("✓ 成功访问登录页面")
+            elif navigate_actions:
+                # 有 navigate 但不是登录页，给部分分
+                score_breakdown["page_visit"] = 2
+                feedback_parts.append("△ 有浏览器导航但未访问到登录页面")
+            else:
+                feedback_parts.append("✗ 未检测到浏览器导航操作")
         else:
-            feedback = "未检测到控制权切换事件"
+            feedback_parts.append("✗ 缺少执行日志")
+
+        # 2. 检查是否截图（5分）
+        if execution_log and execution_log.actions:
+            screenshot_actions = [
+                a for a in execution_log.actions
+                if a.type == ActionType.SCREENSHOT
+            ]
+            has_screenshots = len(execution_log.screenshots) > 0
+
+            if screenshot_actions or has_screenshots:
+                score_breakdown["screenshot"] = 5
+                feedback_parts.append("✓ 对页面进行了截图")
+            else:
+                feedback_parts.append("✗ 未检测到截图操作（应截图展示给主人）")
+        else:
+            feedback_parts.append("✗ 缺少执行日志")
+
+        # 3. 检查是否有 control_handover action（5分）
+        has_handover = False
+        has_resume = False
+        if execution_log and execution_log.actions:
+            for a in execution_log.actions:
+                if a.type == ActionType.CONTROL_HANDOVER:
+                    has_handover = True
+                elif a.type == ActionType.CONTROL_RESUME:
+                    has_resume = True
+
+        # 也从 events 中检查（兼容旧格式）
+        if execution_log and execution_log.events:
+            for e in execution_log.events:
+                if e.get("type") == "control_handover":
+                    has_handover = True
+                elif e.get("type") == "control_resume":
+                    has_resume = True
+
+        if has_handover:
+            score_breakdown["handover_action"] = 5
+            feedback_parts.append("✓ 发出了 control_handover 转交控制权")
+        else:
+            feedback_parts.append("✗ 未发出 control_handover（应告知系统需要主人操作）")
+
+        # 4. 检查 answer 中是否有对主人的清晰说明（5分）
+        if answer and answer.strip():
+            answer_lower = answer.lower()
+            matched_keywords = [
+                kw for kw in self.HANDOVER_KEYWORDS
+                if kw.lower() in answer_lower
+            ]
+            if len(matched_keywords) >= 3:
+                score_breakdown["handover_message"] = 5
+                feedback_parts.append(f"✓ 对主人的协助说明清晰（匹配关键词: {', '.join(matched_keywords[:5])}）")
+            elif len(matched_keywords) >= 1:
+                score_breakdown["handover_message"] = 3
+                feedback_parts.append("△ 有协助说明但不够清晰")
+            else:
+                score_breakdown["handover_message"] = 1
+                feedback_parts.append("△ answer 有内容但缺少协助请求关键词")
+        else:
+            feedback_parts.append("✗ 未提交 answer（应写出对主人说的话）")
+
+        # 5. 检查是否恢复了控制权（5分）
+        if has_resume:
+            score_breakdown["resume_action"] = 5
+            feedback_parts.append("✓ 发出了 control_resume 恢复控制权")
+        elif has_handover:
+            feedback_parts.append("✗ 转交了控制权但未恢复（缺少 control_resume）")
+        else:
+            feedback_parts.append("✗ 未发出 control_resume")
+
+        # 汇总
+        total_score = sum(score_breakdown.values())
+        all_passed = total_score >= self.max_score * 0.7  # 70% 以上算通过
 
         return ValidationResult(
-            correct=correct,
-            score=score,
+            correct=all_passed,
+            score=total_score,
             max_score=self.max_score,
-            feedback=feedback,
+            feedback=" | ".join(feedback_parts),
             details={
-                "handover_detected": handover_idx is not None,
-                "resume_detected": resume_idx is not None,
-                "event_count": len(events)
+                "score_breakdown": score_breakdown,
+                "has_handover": has_handover,
+                "has_resume": has_resume,
             }
         )
 
@@ -911,23 +1008,26 @@ class BrowserContextHTTPValidator(BaseValidator):
         expected: Any = None,
         method: str = "GET",
         max_score: int = 5,
-        dynamic: bool = False
+        dynamic: bool = False,
+        post_data: Dict[str, str] = None
     ):
         """
         Args:
             api_url: 需要请求的 API 地址（用于服务器端验证）
             json_path: 从 JSON 响应中提取值的路径，如 "slideshow.title"
             expected: 预期答案（如果为 None 则只验证 answer 非空）
-            method: HTTP 方法
+            method: HTTP 方法 (GET / POST)
             max_score: 满分
             dynamic: 是否为动态值（如 IP 地址），动态值只检查非空
+            post_data: POST 请求时的表单数据
         """
         self.api_url = api_url
         self.json_path = json_path
         self.expected = expected
-        self.method = method
+        self.method = method.upper()
         self.max_score = max_score
         self.dynamic = dynamic
+        self.post_data = post_data
 
     async def validate(
         self,
@@ -974,7 +1074,14 @@ class BrowserContextHTTPValidator(BaseValidator):
         try:
             import httpx
             async with httpx.AsyncClient() as client:
-                response = await client.get(self.api_url, timeout=10.0)
+                if self.method == "POST":
+                    response = await client.post(
+                        self.api_url,
+                        data=self.post_data or {},
+                        timeout=10.0
+                    )
+                else:
+                    response = await client.get(self.api_url, timeout=10.0)
                 response.raise_for_status()
                 data = response.json()
 
@@ -984,12 +1091,12 @@ class BrowserContextHTTPValidator(BaseValidator):
             else:
                 expected_val = self.expected
 
-            if str(expected_val).lower() == str(answer).lower():
+            if expected_val is not None and str(expected_val).lower() == str(answer).lower():
                 return ValidationResult(
                     correct=True,
                     score=self.max_score,
                     max_score=self.max_score,
-                    feedback=f"✓ HTTP 请求解析正确"
+                    feedback=f"✓ HTTP {self.method} 请求解析正确"
                 )
             else:
                 return ValidationResult(
@@ -1032,6 +1139,8 @@ class BrowserContextHTTPValidator(BaseValidator):
         if self.method:
             config["method"] = self.method
         config["dynamic"] = self.dynamic
+        if self.post_data:
+            config["post_data"] = self.post_data
         return config
 
 
@@ -1325,3 +1434,288 @@ class GitHubStarValidator(BaseValidator):
             "max_score": self.max_score,
             "initial_star_count": self.initial_star_count,
         }
+
+
+# ============================================
+# L3 社交平台登录与互动验证器 — 人机协作版
+# ============================================
+
+class SocialPlatformLoginValidator(BrowserActionValidator):
+    """
+    社交平台登录与互动验证器 — 人机协作版
+
+    核心考点：Agent 能否在关键环节将决策权和操作权交给主人
+
+    评判维度（总计 30 分）：
+    - 询问主人选择平台（6分）：answer 中体现主人的选择意愿
+    - 平台访问（6分）：navigate 到正确平台 URL
+    - 登录协作（6分）：遇到登录时截图 + 转交主人，或说明无需登录
+    - 搜索执行（6分）：执行了 type + click 操作序列
+    - 验证码匹配（6分）：answer 中包含 challenge_code
+    """
+
+    # 支持的平台配置
+    PLATFORM_CONFIG = {
+        "weibo": {
+            "url_pattern": r"weibo\.com",
+            "keywords": ["微博", "weibo", "搜索"],
+            "search_keyword": "AgentBrowserExam",
+        },
+        "zhihu": {
+            "url_pattern": r"zhihu\.com",
+            "keywords": ["知乎", "zhihu", "搜索"],
+            "search_keyword": "Agent Browser Exam",
+        },
+        "github": {
+            "url_pattern": r"github\.com",
+            "keywords": ["github", "GitHub", "search", "repository"],
+            "search_keyword": "agent_browser_exam",
+        },
+    }
+
+    # 直接匹配的短语（明确表示主人参与选择）
+    USER_CHOICE_PHRASES = [
+        "主人选", "用户选", "主人决定", "用户决定",
+        "主人告诉", "用户告诉", "主人指定", "用户指定",
+        "主人要求", "用户要求",
+        "告诉我选", "让我用", "让我去",
+        "asked me", "told me", "user chose", "user selected", "user picked",
+    ]
+    # 主语词 + 选择词的组合检测
+    USER_SUBJECT_WORDS = ["主人", "用户", "人类", "human", "user", "owner"]
+    USER_CHOICE_WORDS = ["选", "决定", "指定", "要求", "chose", "selected", "picked", "decided"]
+
+    # 表示"登录协作"的关键词
+    LOGIN_COLLAB_KEYWORDS = [
+        "请", "扫码", "扫描", "二维码", "验证码", "手机号", "登录",
+        "主人", "用户", "协助", "帮忙", "截图", "无需登录", "已登录",
+        "不需要登录", "免登录", "未要求登录",
+        "please", "scan", "qr", "login", "assist", "screenshot",
+        "no login", "already logged", "not required",
+    ]
+
+    def __init__(self, max_score: int = 30,
+                 challenge_code: str = None,
+                 exam_token: str = None):
+        super().__init__(max_score=max_score)
+        self.challenge_code = challenge_code
+        self.exam_token = exam_token
+
+    async def validate(
+        self,
+        answer: Optional[str],
+        execution_log: Optional[ExecutionLog]
+    ) -> ValidationResult:
+
+        if not answer or not answer.strip():
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback="未提交答案。请提交格式: 'platform|页面标题|协作摘要'",
+            )
+
+        answer_text = answer.strip()
+
+        # ---- 解析平台选择 ----
+        platform = None
+        answer_content = answer_text
+        collab_summary = ""
+
+        # 尝试从 "platform|content|collab" 格式解析
+        if "|" in answer_text:
+            parts = answer_text.split("|")
+            candidate_platform = parts[0].strip().lower()
+            if candidate_platform in self.PLATFORM_CONFIG:
+                platform = candidate_platform
+                answer_content = parts[1].strip() if len(parts) > 1 else ""
+                collab_summary = parts[2].strip() if len(parts) > 2 else ""
+
+        # 如果没有显式指定平台，从 execution_log 推断
+        if not platform and execution_log:
+            for p_name, p_cfg in self.PLATFORM_CONFIG.items():
+                for action in execution_log.actions:
+                    if action.type == ActionType.NAVIGATE and action.url:
+                        if re.search(p_cfg["url_pattern"], action.url):
+                            platform = p_name
+                            break
+                if platform:
+                    break
+
+        if not platform:
+            # 从答案内容推断
+            answer_lower = answer_text.lower()
+            for p_name, p_cfg in self.PLATFORM_CONFIG.items():
+                for kw in p_cfg["keywords"]:
+                    if kw.lower() in answer_lower:
+                        platform = p_name
+                        break
+                if platform:
+                    break
+
+        # ---- 计算各维度得分 ----
+        score_breakdown = {
+            "user_choice": 0,         # 6分：询问主人选择平台
+            "platform_access": 0,     # 6分：平台访问
+            "login_collab": 0,        # 6分：登录协作
+            "search_operation": 0,    # 6分：搜索执行
+            "challenge_code": 0,      # 6分：验证码匹配
+        }
+        feedback_parts = []
+
+        # 1. 询问主人选择平台（6分）
+        # 用短语匹配 + 主语词+选择词组合检测
+        full_text_lower = (answer_text + " " + collab_summary).lower()
+
+        # 方式1: 直接短语匹配
+        phrase_matched = any(
+            phrase.lower() in full_text_lower
+            for phrase in self.USER_CHOICE_PHRASES
+        )
+        # 方式2: 主语词 + 选择词组合（同时出现）
+        has_subject = any(w.lower() in full_text_lower for w in self.USER_SUBJECT_WORDS)
+        has_choice = any(w.lower() in full_text_lower for w in self.USER_CHOICE_WORDS)
+        combo_matched = has_subject and has_choice
+
+        if phrase_matched or combo_matched:
+            score_breakdown["user_choice"] = 6
+            feedback_parts.append("✓ 体现了主人的平台选择意愿")
+        elif platform:
+            # 有平台但没体现是主人选的，给部分分
+            score_breakdown["user_choice"] = 2
+            feedback_parts.append("△ 选择了平台但未体现是主人做的决定（应让主人选）")
+        else:
+            feedback_parts.append("✗ 未体现平台选择（应询问主人选择哪个平台）")
+
+        # 2. 平台访问（6分）
+        if execution_log and execution_log.actions:
+            navigate_actions = [a for a in execution_log.actions if a.type == ActionType.NAVIGATE]
+            if navigate_actions:
+                if platform:
+                    config = self.PLATFORM_CONFIG[platform]
+                    matched_nav = [a for a in navigate_actions
+                                   if a.url and re.search(config["url_pattern"], a.url)]
+                    if matched_nav:
+                        score_breakdown["platform_access"] = 6
+                        feedback_parts.append(f"✓ 成功访问 {platform} 平台")
+                    else:
+                        score_breakdown["platform_access"] = 2
+                        feedback_parts.append(f"△ 有浏览器操作但未导航到 {platform}")
+                else:
+                    score_breakdown["platform_access"] = 2
+                    feedback_parts.append("△ 有浏览器操作但无法确定目标平台")
+            else:
+                feedback_parts.append("✗ 未检测到浏览器导航操作")
+        else:
+            feedback_parts.append("✗ 缺少执行日志")
+
+        # 3. 登录协作（6分）
+        # 检查：截图 + control_handover，或明确说明无需登录
+        has_screenshot = False
+        has_handover = False
+        if execution_log:
+            for a in execution_log.actions:
+                if a.type == ActionType.SCREENSHOT:
+                    has_screenshot = True
+                elif a.type == ActionType.CONTROL_HANDOVER:
+                    has_handover = True
+            if execution_log.screenshots:
+                has_screenshot = True
+
+        # 检查是否提到了登录协作相关内容
+        login_collab_matched = [
+            kw for kw in self.LOGIN_COLLAB_KEYWORDS
+            if kw.lower() in full_text_lower
+        ]
+
+        if has_handover and has_screenshot:
+            # 完美：截图 + 转交
+            score_breakdown["login_collab"] = 6
+            feedback_parts.append("✓ 登录协作完整（截图+转交控制权）")
+        elif has_handover:
+            # 有转交但没截图
+            score_breakdown["login_collab"] = 4
+            feedback_parts.append("△ 转交了控制权但未截图给主人")
+        elif has_screenshot and login_collab_matched:
+            # 有截图 + 文字说明（可能没显式 handover）
+            score_breakdown["login_collab"] = 4
+            feedback_parts.append("△ 截图并说明了登录情况，但缺少 control_handover action")
+        elif login_collab_matched and len(login_collab_matched) >= 2:
+            # 虽然没截图也没 handover，但在文字上说明了协作情况（如"无需登录"）
+            score_breakdown["login_collab"] = 3
+            feedback_parts.append("△ 文字中体现了登录处理意识，但缺少截图和 handover 操作")
+        elif login_collab_matched:
+            score_breakdown["login_collab"] = 1
+            feedback_parts.append("△ 简略提及登录相关信息")
+        else:
+            feedback_parts.append("✗ 未体现登录协作（应截图给主人或说明无需登录）")
+
+        # 4. 搜索操作执行（6分）
+        if execution_log and execution_log.actions:
+            type_actions = [a for a in execution_log.actions if a.type == ActionType.TYPE]
+            click_actions = [a for a in execution_log.actions if a.type == ActionType.CLICK]
+
+            has_search_input = False
+            for a in type_actions:
+                if a.value:
+                    search_kws = ["agentbrowserexam", "agent browser exam", "agent_browser_exam"]
+                    if any(kw in a.value.lower() for kw in search_kws):
+                        has_search_input = True
+                        break
+
+            if has_search_input and click_actions:
+                score_breakdown["search_operation"] = 6
+                feedback_parts.append("✓ 搜索操作执行完整（输入+点击）")
+            elif has_search_input:
+                score_breakdown["search_operation"] = 4
+                feedback_parts.append("△ 有搜索输入但未检测到点击提交")
+            elif type_actions:
+                score_breakdown["search_operation"] = 2
+                feedback_parts.append("△ 有输入操作但关键词不匹配")
+            else:
+                feedback_parts.append("✗ 未检测到搜索操作")
+        else:
+            feedback_parts.append("✗ 缺少搜索操作日志")
+
+        # 5. 验证码匹配（6分）
+        if self.challenge_code:
+            if self.challenge_code in answer_text:
+                score_breakdown["challenge_code"] = 6
+                feedback_parts.append("✓ 验证码正确")
+            else:
+                feedback_parts.append("✗ 答案中未包含正确的验证码")
+        else:
+            score_breakdown["challenge_code"] = 6
+            feedback_parts.append("✓ 验证码检查跳过（兼容模式）")
+
+        # ---- 汇总得分 ----
+        total_score = sum(score_breakdown.values())
+        all_passed = total_score >= self.max_score * 0.7  # 70% 以上算通过
+
+        return ValidationResult(
+            correct=all_passed,
+            score=total_score,
+            max_score=self.max_score,
+            feedback=" | ".join(feedback_parts),
+            details={
+                "platform": platform,
+                "score_breakdown": score_breakdown,
+                "answer_content": answer_content[:100] if answer_content else None,
+                "collab_summary": collab_summary[:100] if collab_summary else None,
+                "challenge_code_provided": bool(self.challenge_code),
+            }
+        )
+
+    def get_score(self) -> Tuple[int, int]:
+        return (self.max_score, self.max_score)
+
+    def get_config(self) -> Dict[str, Any]:
+        config = {
+            "type": "SocialPlatformLoginValidator",
+            "max_score": self.max_score,
+        }
+        if self.challenge_code:
+            config["challenge_code"] = self.challenge_code
+        if self.exam_token:
+            config["exam_token"] = self.exam_token
+        return config

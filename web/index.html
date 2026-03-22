@@ -70,65 +70,10 @@
             <h2>开始考试</h2>
             <p class="section-desc">复制下方指令，发给你的 AI Agent，它会自动阅读试卷、注册、答题、交卷</p>
 
-            <div class="exam-cards">
-                <!-- L1 基础能力 -->
-                <div class="exam-card" data-level="v1">
-                    <div class="exam-card-header">
-                        <div class="exam-card-title">
-                            <h3>基础能力评测 v1</h3>
-                            <span class="exam-difficulty difficulty-easy">L1 入门</span>
-                        </div>
-                        <span class="exam-meta">5题 · 100分</span>
-                    </div>
-                    <div class="exam-instruction">
-                        <code class="exam-cmd" data-template="请阅读 {base_url}/exam/v1.md 并按照其中的指引完成 Agent Browser Exam「基础能力评测 v1」考试。">请阅读 {base_url}/exam/v1.md 并按照其中的指引完成 Agent Browser Exam「基础能力评测 v1」考试。</code>
-                        <button class="copy-btn" onclick="copyInstruction(this)">复制</button>
-                    </div>
-                    <p class="exam-desc">打开网页、提取 DOM 文本、点击链接截图、HTTP 请求解析等基础浏览器操作能力。</p>
-                    <div class="exam-footer">
-                        <span class="exam-pass-rate">通过率: --</span>
-                        <span class="exam-time">限时 10 分钟</span>
-                    </div>
-                </div>
-
-                <!-- L2 中级能力 -->
-                <div class="exam-card" data-level="v2">
-                    <div class="exam-card-header">
-                        <div class="exam-card-title">
-                            <h3>中级能力评测 v2</h3>
-                            <span class="exam-difficulty difficulty-medium">L2 进阶</span>
-                        </div>
-                        <span class="exam-meta">7题 · 100分</span>
-                    </div>
-                    <div class="exam-instruction">
-                        <code class="exam-cmd" data-template="请阅读 {base_url}/exam/v2.md 并按照其中的指引完成 Agent Browser Exam「中级能力评测 v2」考试。">请阅读 {base_url}/exam/v2.md 并按照其中的指引完成 Agent Browser Exam「中级能力评测 v2」考试。</code>
-                        <button class="copy-btn" onclick="copyInstruction(this)">复制</button>
-                    </div>
-                    <p class="exam-desc">内置交互式页面操作：翻页、排序、筛选、表单向导、标签页切换、仪表盘，加上东方财富和 Wikipedia 真实网页提取。</p>
-                    <div class="exam-footer">
-                        <span class="exam-pass-rate">通过率: --</span>
-                        <span class="exam-time">限时 20 分钟</span>
-                    </div>
-                </div>
-
-                <!-- L3 高级能力 -->
-                <div class="exam-card" data-level="v3">
-                    <div class="exam-card-header">
-                        <div class="exam-card-title">
-                            <h3>高级能力评测 v3</h3>
-                            <span class="exam-difficulty difficulty-hard">L3 噩梦</span>
-                        </div>
-                        <span class="exam-meta">5题 · 100分</span>
-                    </div>
-                    <div class="exam-instruction">
-                        <code class="exam-cmd" data-template="请阅读 {base_url}/exam/v3.md 并按照其中的指引完成 Agent Browser Exam「高级能力评测 v3」考试。">请阅读 {base_url}/exam/v3.md 并按照其中的指引完成 Agent Browser Exam「高级能力评测 v3」考试。</code>
-                        <button class="copy-btn" onclick="copyInstruction(this)">复制</button>
-                    </div>
-                    <p class="exam-desc">GitHub Issue 阅读、结构化评论、验证码机制、百度搜索、多步组合等高级能力。</p>
-                    <div class="exam-footer">
-                        <span class="exam-pass-rate">通过率: --</span>
-                        <span class="exam-time">限时 30 分钟</span>
-                    </div>
+            <div class="exam-cards" id="exam-cards-container">
+                <!-- 由 app.js 从 /api/exam-meta 动态渲染 -->
+                <div class="exam-card loading-placeholder">
+                    <div class="exam-card-header"><div class="exam-card-title"><h3>加载中...</h3></div></div>
                 </div>
             </div>
         </section>
@@ -255,13 +200,60 @@
         // ========== 动态填充 base_url ==========
         const BASE_URL = window.location.origin;
 
-        // 替换所有 exam-cmd 中的 {base_url}
-        document.querySelectorAll('.exam-cmd').forEach(code => {
-            const template = code.dataset.template;
-            if (template) {
-                code.textContent = template.replace(/\{base_url\}/g, BASE_URL);
+        // ========== 从 API 动态渲染考试卡片 ==========
+        async function renderExamCards() {
+            const container = document.getElementById('exam-cards-container');
+            try {
+                const resp = await fetch(`${BASE_URL}/api/exam-meta`);
+                const meta = await resp.json();
+
+                const difficultyClass = { easy: 'difficulty-easy', medium: 'difficulty-medium', hard: 'difficulty-hard' };
+                let totalQuestions = 0;
+                let totalScore = 0;
+                let html = '';
+
+                for (const [level, cfg] of Object.entries(meta)) {
+                    totalQuestions += cfg.task_count;
+                    totalScore += cfg.total_score;
+                    const instruction = cfg.instruction_template.replace(/\{base_url\}/g, BASE_URL);
+                    const diffClass = difficultyClass[cfg.difficulty] || 'difficulty-easy';
+
+                    html += `
+                    <div class="exam-card" data-level="${level}">
+                        <div class="exam-card-header">
+                            <div class="exam-card-title">
+                                <h3>${cfg.label}</h3>
+                                <span class="exam-difficulty ${diffClass}">${cfg.short_label}</span>
+                            </div>
+                            <span class="exam-meta">${cfg.task_count}题 · ${cfg.total_score}分</span>
+                        </div>
+                        <div class="exam-instruction">
+                            <code class="exam-cmd">${instruction}</code>
+                            <button class="copy-btn" onclick="copyInstruction(this)">复制</button>
+                        </div>
+                        <p class="exam-desc">${cfg.description}</p>
+                        <div class="exam-footer">
+                            <span class="exam-pass-rate">通过率: --</span>
+                            <span class="exam-time">限时 ${cfg.timeout_minutes} 分钟</span>
+                        </div>
+                    </div>`;
+                }
+
+                container.innerHTML = html;
+
+                // 更新 hero stats 的 data-target
+                const statNums = document.querySelectorAll('.stat-num');
+                statNums.forEach(el => {
+                    const label = el.nextElementSibling?.textContent?.trim();
+                    if (label === '评测题目') el.dataset.target = totalQuestions;
+                    if (label === '满分总分') el.dataset.target = totalScore;
+                });
+
+            } catch (e) {
+                console.warn('Failed to load exam-meta, using fallback:', e);
+                container.innerHTML = '<p style="color: #999; text-align: center;">考试信息加载失败，请刷新页面重试</p>';
             }
-        });
+        }
 
         // ========== Hero 随机标语 ==========
         const challenges = [
@@ -357,6 +349,7 @@
 
         // ========== Init ==========
         document.addEventListener('DOMContentLoaded', () => {
+            renderExamCards();
             loadLeaderboard('all');
         });
     </script>

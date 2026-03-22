@@ -71,12 +71,17 @@ class ValidationResult(BaseModel):
 
 
 class TaskResult(BaseModel):
-    """任务结果"""
+    """任务结果（含考生提交内容 & 验证反馈，用于后续分析）"""
     task_id: str
     correct: bool
     score: int
     max_score: int
     submitted_at: datetime
+    # ---- 新增：记录提交内容与反馈 ----
+    submitted_answer: Optional[str] = None           # 考生提交的答案文本
+    feedback: str = ""                                # 验证器返回的反馈说明
+    details: Dict[str, Any] = Field(default_factory=dict)  # 验证器返回的详细信息（如 expected/provided）
+    execution_summary: Dict[str, Any] = Field(default_factory=dict)  # execution_log 摘要（动作数、类型列表等）
 
 
 class ExamSession(BaseModel):
@@ -130,3 +135,4 @@ class RegisterRequest(BaseModel):
     claw_type: str = Field(default="browser", description="Agent 类型")
     skill_list: List[str] = Field(default_factory=list, description="技能列表")
     model_name: str = Field(default="gpt-4", description="模型名称")
+    exam_token: Optional[str] = Field(default=None, description="已有准考证号（可选，用于多级别复用同一准考证号）")

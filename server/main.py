@@ -30,13 +30,14 @@ from .validators import (
     LoopDetectionValidator, RefMapCacheValidator, ErrorTranslationValidator,
     OnDemandSnapshotValidator, ControlHandoverValidator,
     SearchValidator, MultiStepValidator, BuiltInPageValidator,
-    GitHubStarValidator,
+    GitHubStarValidator, SocialPlatformLoginValidator,
 )
 from .security import (
     security_manager, get_client_ip, verify_request,
     add_security_headers, SecurityManager
 )
 from .storage import get_storage
+from .exam_config import get_timeout_minutes, get_exam_meta
 
 
 # 题目配置
@@ -84,6 +85,12 @@ def create_validator(validator_config: Dict) -> Optional[Any]:
         return GitHubStarValidator(
             max_score=validator_config.get("max_score", 5),
             initial_star_count=validator_config.get("initial_star_count", 0),
+        )
+    elif validator_type == "SocialPlatformLoginValidator":
+        return SocialPlatformLoginValidator(
+            max_score=validator_config.get("max_score", 30),
+            challenge_code=validator_config.get("challenge_code"),
+            exam_token=validator_config.get("exam_token"),
         )
 
     return None
@@ -249,9 +256,11 @@ async def favicon():
 
 @app.get("/cert/{exam_token}")
 async def get_cert_page(exam_token: str):
-    """获取证书页面 - 动态查询考试成绩"""
+    """获取证书页面 - 支持多级别综合成绩单"""
+    from fastapi.responses import HTMLResponse
 
-    if not (session := _get_db().get_session(exam_token)):
+    sessions = _get_db().get_sessions_by_token(exam_token)
+    if not sessions:
         cert_html = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -271,25 +280,87 @@ async def get_cert_page(exam_token: str):
     </div>
 </body>
 </html>"""
-        from fastapi.responses import HTMLResponse
         return HTMLResponse(content=cert_html)
 
-    score_data = await _get_exam_score(session)
+    # 收集多级别成绩
+    agent_name = sessions[0].agent_name
+    agent_type = sessions[0].agent_type
+    total_score = 0
+    total_max = 0
+    total_time = 0.0
 
-    task_rows = ""
-    for tr in score_data.get("task_results", []):
-        icon = "✅" if tr["correct"] else "❌"
-        task_rows += f"<tr><td>{tr['task_id']}</td><td>{icon} {tr['score']}分</td></tr>"
+    level_cards_html = ""
+    level_labels = {"v1": "L1 基础", "v2": "L2 中级", "v3": "L3 高级"}
+    level_colors = {"v1": "#48bb78", "v2": "#667eea", "v3": "#f56565"}
 
-    grade_colors = {"S": "#ffd700", "A": "#667eea", "B": "#48bb78", "C": "#f56565", "D": "#ed8936", "F": "#999"}
-    grade_color = grade_colors.get(score_data["grade"], "#667eea")
+    for session in sessions:
+        level = session.exam_id.value
+        label = level_labels.get(level, level)
+        color = level_colors.get(level, "#667eea")
+
+        if session.completed:
+            score_data = await _get_exam_score(session)
+            s = score_data["total_score"]
+            m = score_data["max_score"]
+            t = score_data["total_time_seconds"]
+            g = score_data["grade"]
+            total_score += s
+            total_max += m
+            total_time += t
+
+            task_rows = ""
+            for tr in score_data.get("task_results", []):
+                icon = "✅" if tr["correct"] else "❌"
+                task_rows += f"<tr><td>{tr['task_id']}</td><td>{icon} {tr['score']}/{tr['max_score']}</td></tr>"
+
+            level_cards_html += f"""
+            <div class="level-card" style="border-left: 4px solid {color};">
+                <div class="level-header">
+                    <span class="level-label" style="color: {color};">{label}</span>
+                    <span class="level-grade">{g}</span>
+                </div>
+                <div class="level-score">{s}/{m}</div>
+                <div class="level-time">{t:.1f} 秒</div>
+                <table class="results-table">
+                    <thead><tr><th>题号</th><th>得分</th></tr></thead>
+                    <tbody>{task_rows}</tbody>
+                </table>
+            </div>"""
+        else:
+            done = len(session.results)
+            tot = len(session.tasks)
+            level_cards_html += f"""
+            <div class="level-card" style="border-left: 4px solid #ccc;">
+                <div class="level-header">
+                    <span class="level-label" style="color: #999;">{label}</span>
+                    <span class="level-grade" style="background: #ccc;">⏳</span>
+                </div>
+                <div class="level-score" style="color: #999;">进行中 ({done}/{tot})</div>
+            </div>"""
+
+    # 未参加的级别
+    participated = {s.exam_id.value for s in sessions}
+    for lv in ["v1", "v2", "v3"]:
+        if lv not in participated:
+            label = level_labels[lv]
+            level_cards_html += f"""
+            <div class="level-card" style="border-left: 4px solid #eee;">
+                <div class="level-header">
+                    <span class="level-label" style="color: #ccc;">{label}</span>
+                </div>
+                <div class="level-score" style="color: #ccc;">未参加</div>
+            </div>"""
+
+    overall_grade = calculate_grade(total_score, total_max) if total_max > 0 else "—"
+    grade_colors = {"S": "#ffd700", "A": "#667eea", "B": "#48bb78", "C": "#f56565", "D": "#ed8936", "F": "#999", "—": "#ccc"}
+    grade_color = grade_colors.get(overall_grade, "#667eea")
 
     cert_html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>考试成绩 - {score_data['agent_name']} - Agent Browser Exam</title>
+    <title>考试成绩 - {agent_name} - Agent Browser Exam</title>
     <style>
         * {{ box-sizing: border-box; }}
         body {{
@@ -299,7 +370,7 @@ async def get_cert_page(exam_token: str):
             margin: 0;
             padding: 20px;
         }}
-        .container {{ max-width: 600px; margin: 0 auto; }}
+        .container {{ max-width: 650px; margin: 0 auto; }}
         .card {{
             background: white;
             border-radius: 20px;
@@ -308,44 +379,69 @@ async def get_cert_page(exam_token: str):
             text-align: center;
         }}
         h1 {{ color: #333; margin: 0 0 5px 0; }}
-        .subtitle {{ color: #666; margin: 0 0 20px 0; }}
+        .subtitle {{ color: #666; margin: 0 0 10px 0; }}
         .agent {{ color: #888; font-size: 14px; margin-bottom: 20px; }}
         .score-display {{ margin: 20px 0; }}
-        .score-number {{ font-size: 64px; font-weight: bold; color: #667eea; }}
+        .score-number {{ font-size: 56px; font-weight: bold; color: #667eea; }}
         .grade-badge {{
             display: inline-block;
-            font-size: 36px;
+            font-size: 32px;
             font-weight: bold;
             color: white;
             background: {grade_color};
-            width: 80px;
-            height: 80px;
-            line-height: 80px;
+            width: 70px;
+            height: 70px;
+            line-height: 70px;
             border-radius: 50%;
-            margin: 15px 0;
+            margin: 10px 0;
         }}
-        .meta {{ color: #888; font-size: 14px; margin: 15px 0; }}
+        .meta {{ color: #888; font-size: 14px; margin: 10px 0; }}
         .token-box {{
             background: #f8f9fa;
-            padding: 15px 20px;
+            padding: 12px 16px;
             border-radius: 10px;
             font-family: monospace;
-            font-size: 18px;
-            margin: 15px 0;
+            font-size: 16px;
+            margin: 12px 0;
             word-break: break-all;
         }}
+        .level-cards {{ text-align: left; margin: 20px 0; }}
+        .level-card {{
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 12px;
+        }}
+        .level-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }}
+        .level-label {{ font-weight: 600; font-size: 16px; }}
+        .level-grade {{
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            padding: 2px 10px;
+            border-radius: 12px;
+        }}
+        .level-score {{ font-size: 24px; font-weight: bold; color: #333; }}
+        .level-time {{ color: #888; font-size: 13px; }}
         .results-table {{
             width: 100%;
             border-collapse: collapse;
-            margin: 20px 0;
-            font-size: 14px;
+            margin-top: 10px;
+            font-size: 13px;
         }}
         .results-table th, .results-table td {{
-            padding: 10px;
+            padding: 6px 8px;
             text-align: left;
             border-bottom: 1px solid #eee;
         }}
-        .results-table th {{ background: #f8f9fa; }}
+        .results-table th {{ color: #888; font-weight: normal; }}
         .links {{ margin-top: 20px; }}
         .links a {{ color: #667eea; text-decoration: none; margin: 0 10px; }}
         .links a:hover {{ text-decoration: underline; }}
@@ -354,26 +450,21 @@ async def get_cert_page(exam_token: str):
 <body>
     <div class="container">
         <div class="card">
-            <h1>🎉 考试成绩</h1>
+            <h1>🎉 考试成绩单</h1>
             <p class="subtitle">Agent Browser Exam</p>
-            <p class="agent">{score_data['agent_name']} · {score_data['agent_type']}</p>
+            <p class="agent">{agent_name} · {agent_type}</p>
 
             <div class="score-display">
-                <div class="score-number">{score_data['total_score']}/{score_data['max_score']}</div>
-                <div class="grade-badge">{score_data['grade']}</div>
+                <div class="score-number">{total_score}/{total_max}</div>
+                <div class="grade-badge">{overall_grade}</div>
             </div>
 
-            <table class="results-table">
-                <thead>
-                    <tr><th>题号</th><th>得分</th></tr>
-                </thead>
-                <tbody>
-                    {task_rows}
-                </tbody>
-            </table>
+            <div class="level-cards">
+                {level_cards_html}
+            </div>
 
             <div class="token-box">{exam_token}</div>
-            <p class="meta">用时 {score_data['total_time_seconds']:.1f} 秒</p>
+            <p class="meta">总用时 {total_time:.1f} 秒</p>
 
             <div class="links">
                 <a href="/web/#leaderboard">🏆 查看排行榜</a>
@@ -383,7 +474,6 @@ async def get_cert_page(exam_token: str):
     </div>
 </body>
 </html>"""
-    from fastapi.responses import HTMLResponse
     return HTMLResponse(content=cert_html)
 
 
@@ -441,6 +531,12 @@ async def health_check():
     return {"status": "ok", "service": "Agent Browser Exam"}
 
 
+@app.get("/api/exam-meta")
+async def exam_meta():
+    """返回考试元信息（级别配置、题数、总分等），供前端动态渲染"""
+    return get_exam_meta()
+
+
 @app.get("/api/tasks/{level}")
 async def get_tasks(level: str):
     """获取题目列表"""
@@ -458,6 +554,7 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "health": "GET /api/health",
+            "exam_meta": "GET /api/exam-meta",
             "register": "POST /api/register",
             "submit": "POST /api/submit",
             "score": "GET /api/score/{exam_token}",
@@ -468,7 +565,7 @@ async def root():
 
 @app.post("/api/register")
 async def register(request: Request, data: RegisterRequest):
-    """注册考试，获取准考证号和第一题"""
+    """注册考试，获取准考证号和第一题。支持传入已有 exam_token 复用准考证号。"""
 
     # 注册不需要 API Key，只检查 IP 频率限制
     ip = get_client_ip(request)
@@ -490,6 +587,7 @@ async def register(request: Request, data: RegisterRequest):
                 break
         return {
             "exam_token": existing.exam_token,
+            "candidate_id": existing.exam_token,
             "total_questions": len(existing.tasks),
             "total_score": sum(t["max_score"] for t in existing.tasks),
             "first_question": None,
@@ -501,6 +599,7 @@ async def register(request: Request, data: RegisterRequest):
             },
             "exam_id": data.exam_id,
             "expires_in_minutes": existing.timeout_minutes,
+            "completed_levels": _get_db().get_completed_levels(existing.exam_token),
             "resume_hint": (
                 f"[恢复已有会话] 你已有未完成的考试，准考证号: {existing.exam_token}\n"
                 f"已完成 {len(existing.results)}/{len(existing.tasks)} 题，继续答题即可。\n"
@@ -519,12 +618,27 @@ async def register(request: Request, data: RegisterRequest):
     if data.exam_id not in ["v1", "v2", "v3"]:
         raise HTTPException(status_code=400, detail="无效的考试级别")
 
-    exam_token = generate_exam_token()
+    # ---- 准考证号处理：复用或新生成 ----
+    if data.exam_token:
+        # 复用已有准考证号
+        if not verify_exam_token(data.exam_token):
+            raise HTTPException(status_code=403, detail="无效的准考证号，签名验证失败")
+        # 检查该 (exam_token, exam_id) 是否已存在已完成的会话
+        existing_session = _get_db().get_session(data.exam_token, data.exam_id)
+        if existing_session and existing_session.completed:
+            raise HTTPException(
+                status_code=409,
+                detail=f"该准考证号已完成 {data.exam_id} 级别考试，不可重复注册"
+            )
+        exam_token = data.exam_token
+    else:
+        # 生成新准考证号
+        exam_token = generate_exam_token()
 
     # 获取题目
     tasks = get_tasks_for_level(data.exam_id)
 
-    # 为 L3-4（GitHub Issue 讨论）注入 challenge_code
+    # 为 L3-4（社交平台登录与互动）注入 challenge_code
     challenge_code = None
     for task in tasks:
         if task.get("id") == "L3-4":
@@ -539,27 +653,8 @@ async def register(request: Request, data: RegisterRequest):
                 task["validator_config"]["challenge_code"] = challenge_code
             break
 
-    # 为 L3-5（GitHub Star）注入开考前 star 数
-    for task in tasks:
-        if task.get("id") == "L3-5":
-            try:
-                import httpx
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(
-                        "https://api.github.com/repos/Yourdaylight/agent_browser_exam",
-                        timeout=10.0
-                    )
-                    resp.raise_for_status()
-                    star_count = resp.json().get("stargazers_count", 0)
-                if task.get("validator_config"):
-                    task["validator_config"]["initial_star_count"] = star_count
-            except Exception:
-                pass  # star 数获取失败不影响注册
-            break
-
-    # 按级别设置差异化超时时间
-    EXAM_TIMEOUT = {"v1": 10, "v2": 20, "v3": 30}
-    timeout_minutes = EXAM_TIMEOUT.get(data.exam_id, 30)
+    # 从集中配置读取超时时间
+    timeout_minutes = get_timeout_minutes(data.exam_id)
 
     # 创建会话
     session = ExamSession(
@@ -579,17 +674,23 @@ async def register(request: Request, data: RegisterRequest):
 
     _get_db().save_session(session)
 
+    # 已完成的其他级别
+    completed_levels = _get_db().get_completed_levels(exam_token)
+
     return {
         "exam_token": exam_token,
+        "candidate_id": exam_token,
         "total_questions": len(tasks),
         "total_score": sum(t["max_score"] for t in tasks),
         "first_question": tasks[0] if tasks else None,
         "exam_id": data.exam_id,
         "expires_in_minutes": timeout_minutes,
+        "completed_levels": completed_levels,
         "resume_hint": (
             f"[重要] 请务必保存你的准考证号: {exam_token}\n"
             f"如果你的对话因上下文超长而中断，可以在新对话中调用 GET /api/next/{exam_token} 继续答题。\n"
-            f"所有已提交的答案会保留，不会丢失。"
+            f"所有已提交的答案会保留，不会丢失。\n"
+            f"如需继续考其他级别，注册时传入 exam_token 即可复用同一准考证号。"
         ),
     }
 
@@ -616,7 +717,17 @@ async def submit_answer(request: Request, data: TaskSubmit):
     exam_token = data.exam_token
     task_id = data.task_id
 
-    session = _get_db().get_session(exam_token)
+    # 通过 task_id 前缀推导 exam_id: L1-* → v1, L2-* → v2, L3-* → v3
+    task_prefix = task_id.split("-")[0] if "-" in task_id else ""
+    exam_id_map = {"L1": "v1", "L2": "v2", "L3": "v3"}
+    inferred_exam_id = exam_id_map.get(task_prefix)
+
+    # 先尝试精确查找，再回退到模糊查找
+    session = None
+    if inferred_exam_id:
+        session = _get_db().get_session(exam_token, inferred_exam_id)
+    if not session:
+        session = _get_db().get_session(exam_token)
     if not session:
         raise HTTPException(status_code=404, detail="考试会话不存在或已过期")
 
@@ -634,6 +745,37 @@ async def submit_answer(request: Request, data: TaskSubmit):
     if not task_config:
         raise HTTPException(status_code=404, detail="题目不存在")
 
+    # ========== 防止重复提交 ==========
+    if task_id in session.results:
+        existing_result = session.results[task_id]
+        # 找到下一题（跳过已完成的）
+        next_task = None
+        current_idx = session.current_task_index
+        for i, t in enumerate(session.tasks):
+            if t["id"] == task_id:
+                current_idx = i
+                break
+        if current_idx + 1 < len(session.tasks):
+            next_task = session.tasks[current_idx + 1]
+
+        return {
+            "correct": existing_result.correct,
+            "score": existing_result.score,
+            "progress": {
+                "completed": len(session.results),
+                "total": len(session.tasks)
+            },
+            "next_question": next_task,
+            "all_done": session.completed,
+            "feedback": f"⚠️ 该题已提交过，不可重复作答。原始得分: {existing_result.score}/{existing_result.max_score}",
+            "details": {"duplicate_submission": True, "original_score": existing_result.score},
+            "exam_token": exam_token,
+            "resume_hint": (
+                f"准考证号: {exam_token} (请保存)\n"
+                f"如对话中断，用 GET /api/next/{exam_token} 继续答题"
+            ),
+        }
+
     # 创建验证器
     validator_config = task_config.get("validator_config")
     validator = create_validator(validator_config)
@@ -645,13 +787,32 @@ async def submit_answer(request: Request, data: TaskSubmit):
     # data.execution_log 已经被 Pydantic 解析为 ExecutionLog 对象，直接使用
     result = await validator.validate(data.answer, data.execution_log)
 
-    # 记录结果
+    # 构建 execution_log 摘要（不保存完整截图等大数据，只留关键统计信息）
+    exec_summary = {}
+    if data.execution_log:
+        elog = data.execution_log
+        action_types = [a.type.value for a in elog.actions]
+        exec_summary = {
+            "action_count": len(elog.actions),
+            "action_types": action_types,
+            "token_consumed": elog.token_consumed,
+            "has_screenshots": len(elog.screenshots) > 0,
+            "screenshot_count": len(elog.screenshots),
+            "event_count": len(elog.events),
+            "metadata": elog.metadata,
+        }
+
+    # 记录结果（含考生提交内容和验证反馈）
     task_result = TaskResult(
         task_id=task_id,
         correct=result.correct,
         score=result.score,
         max_score=result.max_score,
-        submitted_at=datetime.now()
+        submitted_at=datetime.now(),
+        submitted_answer=data.answer,
+        feedback=result.feedback,
+        details=result.details,
+        execution_summary=exec_summary,
     )
     session.results[task_id] = task_result
 
@@ -700,17 +861,33 @@ async def submit_answer(request: Request, data: TaskSubmit):
 
 @app.get("/api/next/{exam_token}")
 async def get_next_question(exam_token: str):
-    """断线重连时获取当前题目"""
+    """断线重连时获取当前题目。支持同一 token 多级别，自动找未完成的会话。"""
 
     if not verify_exam_token(exam_token):
         raise HTTPException(status_code=403, detail="无效的准考证号")
 
-    session = _get_db().get_session(exam_token)
-    if not session:
+    # 查找该 token 下所有会话，找到未完成的
+    sessions = _get_db().get_sessions_by_token(exam_token)
+    if not sessions:
         raise HTTPException(status_code=404, detail="考试会话不存在或已过期")
 
-    if session.completed:
-        return {"all_done": True, "score": await _get_total_score(session)}
+    # 找到未完成的会话
+    active_session = None
+    for s in sessions:
+        if not s.completed:
+            active_session = s
+            break
+
+    if not active_session:
+        # 所有级别都已完成
+        completed_levels = [s.exam_id.value for s in sessions if s.completed]
+        return {
+            "all_done": True,
+            "completed_levels": completed_levels,
+            "message": f"所有已注册的级别均已完成: {', '.join(completed_levels)}"
+        }
+
+    session = active_session
 
     # 找到下一个未完成的题目
     for i, t in enumerate(session.tasks):
@@ -720,12 +897,15 @@ async def get_next_question(exam_token: str):
             return {
                 "next_question": t,
                 "all_done": False,
+                "exam_id": session.exam_id.value,
                 "progress": {
                     "completed": len(session.results),
                     "total": len(session.tasks)
                 },
+                "completed_levels": _get_db().get_completed_levels(exam_token),
                 "resume_hint": (
                     f"已从断点恢复！准考证号: {exam_token}\n"
+                    f"当前级别: {session.exam_id.value}\n"
                     f"如再次中断，用 GET /api/next/{exam_token} 继续答题"
                 ),
             }
@@ -735,25 +915,67 @@ async def get_next_question(exam_token: str):
 
 @app.get("/api/score/{exam_token}")
 async def get_score(exam_token: str):
-    """获取考试成绩"""
+    """
+    获取考试成绩。
+    - 如果该 token 只有一个级别 → 返回单级别成绩（向后兼容）
+    - 如果有多个级别 → 返回多级别综合成绩
+    """
 
     if not verify_exam_token(exam_token):
         raise HTTPException(status_code=403, detail="无效的准考证号")
 
-    session = _get_db().get_session(exam_token)
-    if not session:
+    sessions = _get_db().get_sessions_by_token(exam_token)
+    if not sessions:
         raise HTTPException(status_code=404, detail="考试会话不存在或已过期")
 
-    if not session.completed:
-        # 返回当前进度
-        return {
-            "status": "in_progress",
-            "completed": len(session.results),
-            "total": len(session.tasks),
-            "current_score": sum(r.score for r in session.results.values())
-        }
+    # 构建多级别成绩
+    levels_data = {}
+    total_score = 0
+    total_max_score = 0
+    total_time = 0
+    agent_name = sessions[0].agent_name
+    agent_type = sessions[0].agent_type
 
-    return await _get_exam_score(session)
+    any_in_progress = False
+
+    for session in sessions:
+        level = session.exam_id.value
+        if not session.completed:
+            levels_data[level] = {
+                "status": "in_progress",
+                "completed_tasks": len(session.results),
+                "total_tasks": len(session.tasks),
+                "current_score": sum(r.score for r in session.results.values()),
+            }
+            any_in_progress = True
+        else:
+            score_data = await _get_exam_score(session)
+            levels_data[level] = {
+                "status": "completed",
+                "score": score_data["total_score"],
+                "max_score": score_data["max_score"],
+                "grade": score_data["grade"],
+                "time_seconds": score_data["total_time_seconds"],
+                "task_results": score_data["task_results"],
+            }
+            total_score += score_data["total_score"]
+            total_max_score += score_data["max_score"]
+            total_time += score_data["total_time_seconds"]
+
+    overall_grade = calculate_grade(total_score, total_max_score) if total_max_score > 0 else "F"
+
+    return {
+        "candidate_id": exam_token,
+        "agent_name": agent_name,
+        "agent_type": agent_type,
+        "levels": levels_data,
+        "total_score": total_score,
+        "total_max_score": total_max_score,
+        "overall_grade": overall_grade,
+        "total_time_seconds": total_time,
+        "all_completed": not any_in_progress,
+        "certificate_url": f"/cert/{exam_token}",
+    }
 
 
 async def _finalize_exam(session: ExamSession):
