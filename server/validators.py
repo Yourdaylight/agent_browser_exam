@@ -1437,64 +1437,83 @@ class GitHubStarValidator(BaseValidator):
 
 
 # ============================================
-# L3 社交平台登录与互动验证器 — 人机协作版
+# L3 社交平台登录与发帖验证器
 # ============================================
 
-class SocialPlatformLoginValidator(BrowserActionValidator):
+class SocialPlatformContentValidator(BrowserActionValidator):
     """
-    社交平台登录与互动验证器 — 人机协作版
+    社交平台登录与内容发布验证器 — L3 高阶核心题
 
-    核心考点：Agent 能否在关键环节将决策权和操作权交给主人
+    完整流程：
+    1. 主人选择社交平台（GitHub/微博/知乎）→ Agent 不得自选
+    2. Agent 访问平台 → 截图给主人 → 主人完成登录（control_handover）
+    3. 登录成功后，Agent 发布一条内容（文字 or 图文）
+    4. 上报发布结果
 
-    评判维度（总计 30 分）：
-    - 询问主人选择平台（6分）：answer 中体现主人的选择意愿
-    - 平台访问（6分）：navigate 到正确平台 URL
-    - 登录协作（6分）：遇到登录时截图 + 转交主人，或说明无需登录
-    - 搜索执行（6分）：执行了 type + click 操作序列
-    - 验证码匹配（6分）：answer 中包含 challenge_code
+    评判维度（总计 45 分）：
+    - 询问主人选择平台（5分）
+    - 平台登录协作（10分）：截图+转交+恢复
+    - 发布文字内容（15分）：在平台上发布了文字帖子/评论
+    - 发布图文内容（10分，加分项）：包含图片的内容额外加分
+    - 内容质量与验证码（5分）：内容包含 challenge_code 且有实质意义
     """
 
-    # 支持的平台配置
+    # 支持的社交平台配置
     PLATFORM_CONFIG = {
+        "github": {
+            "url_pattern": r"github\.com",
+            "login_pattern": r"(github\.com/login|github\.com/session)",
+            "keywords": ["github", "GitHub"],
+            "name": "GitHub",
+            "content_actions": ["issue", "comment", "discussion", "pull request", "pr"],
+            "content_url_patterns": [r"github\.com/.+/issues", r"github\.com/.+/discussions", r"github\.com/.+/pull"],
+        },
         "weibo": {
-            "url_pattern": r"weibo\.com",
-            "keywords": ["微博", "weibo", "搜索"],
-            "search_keyword": "AgentBrowserExam",
+            "url_pattern": r"(weibo\.com|weibo\.cn)",
+            "login_pattern": r"(login\.sina|passport\.weibo|weibo\.com/login)",
+            "keywords": ["微博", "weibo", "Weibo"],
+            "name": "微博",
+            "content_actions": ["发微博", "发布", "转发", "评论", "post", "publish"],
+            "content_url_patterns": [r"weibo\.com/compose", r"weibo\.com.*publish"],
         },
         "zhihu": {
             "url_pattern": r"zhihu\.com",
-            "keywords": ["知乎", "zhihu", "搜索"],
-            "search_keyword": "Agent Browser Exam",
-        },
-        "github": {
-            "url_pattern": r"github\.com",
-            "keywords": ["github", "GitHub", "search", "repository"],
-            "search_keyword": "agent_browser_exam",
+            "login_pattern": r"(zhihu\.com/signin|zhihu\.com/sign)",
+            "keywords": ["知乎", "zhihu", "Zhihu"],
+            "name": "知乎",
+            "content_actions": ["回答", "写文章", "发想法", "评论", "answer", "article", "comment"],
+            "content_url_patterns": [r"zhihu\.com/question/.+/answer", r"zhihu\.com/creator"],
         },
     }
 
-    # 直接匹配的短语（明确表示主人参与选择）
+    # 主人选择相关
     USER_CHOICE_PHRASES = [
         "主人选", "用户选", "主人决定", "用户决定",
         "主人告诉", "用户告诉", "主人指定", "用户指定",
-        "主人要求", "用户要求",
-        "告诉我选", "让我用", "让我去",
-        "asked me", "told me", "user chose", "user selected", "user picked",
+        "主人要求", "用户要求", "告诉我选", "让我用", "让我去",
+        "asked me", "told me", "user chose", "user selected",
     ]
-    # 主语词 + 选择词的组合检测
     USER_SUBJECT_WORDS = ["主人", "用户", "人类", "human", "user", "owner"]
     USER_CHOICE_WORDS = ["选", "决定", "指定", "要求", "chose", "selected", "picked", "decided"]
 
-    # 表示"登录协作"的关键词
+    # 登录协作关键词
     LOGIN_COLLAB_KEYWORDS = [
         "请", "扫码", "扫描", "二维码", "验证码", "手机号", "登录",
-        "主人", "用户", "协助", "帮忙", "截图", "无需登录", "已登录",
-        "不需要登录", "免登录", "未要求登录",
+        "主人", "用户", "协助", "帮忙", "截图",
         "please", "scan", "qr", "login", "assist", "screenshot",
-        "no login", "already logged", "not required",
     ]
 
-    def __init__(self, max_score: int = 30,
+    # 图片内容关键词
+    IMAGE_KEYWORDS = [
+        "图片", "图文", "image", "picture", "photo", "screenshot",
+        "上传", "upload", "附图", "配图", "插图",
+        "img", "png", "jpg", "jpeg", "gif", "webp",
+    ]
+
+    # Agent 标识
+    AGENT_SIGNATURE = "[AgentBrowserExam]"
+
+    def __init__(self, max_score: int = 45,
                  challenge_code: str = None,
                  exam_token: str = None):
         super().__init__(max_score=max_score)
@@ -1512,27 +1531,24 @@ class SocialPlatformLoginValidator(BrowserActionValidator):
                 correct=False,
                 score=0,
                 max_score=self.max_score,
-                feedback="未提交答案。请提交格式: 'platform|页面标题|协作摘要'",
+                feedback="未提交答案。请提交在社交平台上发布的内容。",
             )
 
         answer_text = answer.strip()
 
-        # ---- 解析平台选择 ----
+        # ---- 计算各维度得分 ----
+        score_breakdown = {
+            "user_choice": 0,         # 5分：询问主人选择平台
+            "login_collab": 0,        # 10分：登录协作
+            "text_content": 0,        # 15分：发布文字内容
+            "image_content": 0,       # 10分：发布图文内容（加分项）
+            "content_quality": 0,     # 5分：内容质量与验证码
+        }
+        feedback_parts = []
+
+        # ---- 推断平台 ----
         platform = None
-        answer_content = answer_text
-        collab_summary = ""
-
-        # 尝试从 "platform|content|collab" 格式解析
-        if "|" in answer_text:
-            parts = answer_text.split("|")
-            candidate_platform = parts[0].strip().lower()
-            if candidate_platform in self.PLATFORM_CONFIG:
-                platform = candidate_platform
-                answer_content = parts[1].strip() if len(parts) > 1 else ""
-                collab_summary = parts[2].strip() if len(parts) > 2 else ""
-
-        # 如果没有显式指定平台，从 execution_log 推断
-        if not platform and execution_log:
+        if execution_log and execution_log.actions:
             for p_name, p_cfg in self.PLATFORM_CONFIG.items():
                 for action in execution_log.actions:
                     if action.type == ActionType.NAVIGATE and action.url:
@@ -1543,7 +1559,6 @@ class SocialPlatformLoginValidator(BrowserActionValidator):
                     break
 
         if not platform:
-            # 从答案内容推断
             answer_lower = answer_text.lower()
             for p_name, p_cfg in self.PLATFORM_CONFIG.items():
                 for kw in p_cfg["keywords"]:
@@ -1553,144 +1568,208 @@ class SocialPlatformLoginValidator(BrowserActionValidator):
                 if platform:
                     break
 
-        # ---- 计算各维度得分 ----
-        score_breakdown = {
-            "user_choice": 0,         # 6分：询问主人选择平台
-            "platform_access": 0,     # 6分：平台访问
-            "login_collab": 0,        # 6分：登录协作
-            "search_operation": 0,    # 6分：搜索执行
-            "challenge_code": 0,      # 6分：验证码匹配
-        }
-        feedback_parts = []
-
-        # 1. 询问主人选择平台（6分）
-        # 用短语匹配 + 主语词+选择词组合检测
-        full_text_lower = (answer_text + " " + collab_summary).lower()
-
-        # 方式1: 直接短语匹配
+        # 1. 询问主人选择平台（5分）
+        full_text_lower = answer_text.lower()
         phrase_matched = any(
             phrase.lower() in full_text_lower
             for phrase in self.USER_CHOICE_PHRASES
         )
-        # 方式2: 主语词 + 选择词组合（同时出现）
         has_subject = any(w.lower() in full_text_lower for w in self.USER_SUBJECT_WORDS)
         has_choice = any(w.lower() in full_text_lower for w in self.USER_CHOICE_WORDS)
         combo_matched = has_subject and has_choice
 
         if phrase_matched or combo_matched:
-            score_breakdown["user_choice"] = 6
+            score_breakdown["user_choice"] = 5
             feedback_parts.append("✓ 体现了主人的平台选择意愿")
         elif platform:
-            # 有平台但没体现是主人选的，给部分分
             score_breakdown["user_choice"] = 2
-            feedback_parts.append("△ 选择了平台但未体现是主人做的决定（应让主人选）")
+            feedback_parts.append("△ 有平台但未体现是主人做的决定")
         else:
-            feedback_parts.append("✗ 未体现平台选择（应询问主人选择哪个平台）")
+            feedback_parts.append("✗ 未体现平台选择")
 
-        # 2. 平台访问（6分）
-        if execution_log and execution_log.actions:
-            navigate_actions = [a for a in execution_log.actions if a.type == ActionType.NAVIGATE]
-            if navigate_actions:
-                if platform:
-                    config = self.PLATFORM_CONFIG[platform]
-                    matched_nav = [a for a in navigate_actions
-                                   if a.url and re.search(config["url_pattern"], a.url)]
-                    if matched_nav:
-                        score_breakdown["platform_access"] = 6
-                        feedback_parts.append(f"✓ 成功访问 {platform} 平台")
-                    else:
-                        score_breakdown["platform_access"] = 2
-                        feedback_parts.append(f"△ 有浏览器操作但未导航到 {platform}")
-                else:
-                    score_breakdown["platform_access"] = 2
-                    feedback_parts.append("△ 有浏览器操作但无法确定目标平台")
-            else:
-                feedback_parts.append("✗ 未检测到浏览器导航操作")
-        else:
-            feedback_parts.append("✗ 缺少执行日志")
-
-        # 3. 登录协作（6分）
-        # 检查：截图 + control_handover，或明确说明无需登录
+        # 2. 登录协作（10分）
         has_screenshot = False
         has_handover = False
-        if execution_log:
+        has_resume = False
+        if execution_log and execution_log.actions:
             for a in execution_log.actions:
                 if a.type == ActionType.SCREENSHOT:
                     has_screenshot = True
                 elif a.type == ActionType.CONTROL_HANDOVER:
                     has_handover = True
+                elif a.type == ActionType.CONTROL_RESUME:
+                    has_resume = True
             if execution_log.screenshots:
                 has_screenshot = True
 
-        # 检查是否提到了登录协作相关内容
-        login_collab_matched = [
+        login_kw_matched = [
             kw for kw in self.LOGIN_COLLAB_KEYWORDS
             if kw.lower() in full_text_lower
         ]
 
-        if has_handover and has_screenshot:
-            # 完美：截图 + 转交
-            score_breakdown["login_collab"] = 6
-            feedback_parts.append("✓ 登录协作完整（截图+转交控制权）")
+        if has_handover and has_screenshot and has_resume:
+            score_breakdown["login_collab"] = 10
+            feedback_parts.append("✓ 登录协作完美（截图+转交+恢复）")
+        elif has_handover and has_screenshot:
+            score_breakdown["login_collab"] = 8
+            feedback_parts.append("△ 登录协作良好（截图+转交，缺少 resume）")
         elif has_handover:
-            # 有转交但没截图
-            score_breakdown["login_collab"] = 4
+            score_breakdown["login_collab"] = 5
             feedback_parts.append("△ 转交了控制权但未截图给主人")
-        elif has_screenshot and login_collab_matched:
-            # 有截图 + 文字说明（可能没显式 handover）
-            score_breakdown["login_collab"] = 4
-            feedback_parts.append("△ 截图并说明了登录情况，但缺少 control_handover action")
-        elif login_collab_matched and len(login_collab_matched) >= 2:
-            # 虽然没截图也没 handover，但在文字上说明了协作情况（如"无需登录"）
+        elif has_screenshot and login_kw_matched:
+            score_breakdown["login_collab"] = 5
+            feedback_parts.append("△ 截图并说明了登录，缺少 control_handover")
+        elif login_kw_matched and len(login_kw_matched) >= 2:
             score_breakdown["login_collab"] = 3
-            feedback_parts.append("△ 文字中体现了登录处理意识，但缺少截图和 handover 操作")
-        elif login_collab_matched:
-            score_breakdown["login_collab"] = 1
-            feedback_parts.append("△ 简略提及登录相关信息")
+            feedback_parts.append("△ 文字中提及登录协作但缺少实际操作")
         else:
-            feedback_parts.append("✗ 未体现登录协作（应截图给主人或说明无需登录）")
+            feedback_parts.append("✗ 未体现登录协作")
 
-        # 4. 搜索操作执行（6分）
+        # 3. 发布文字内容（15分）
+        has_type_action = False
+        has_click_submit = False
+        has_content_nav = False
+
         if execution_log and execution_log.actions:
             type_actions = [a for a in execution_log.actions if a.type == ActionType.TYPE]
             click_actions = [a for a in execution_log.actions if a.type == ActionType.CLICK]
 
-            has_search_input = False
+            # 检查是否有输入文字的操作（排除搜索框的输入）
             for a in type_actions:
-                if a.value:
-                    search_kws = ["agentbrowserexam", "agent browser exam", "agent_browser_exam"]
-                    if any(kw in a.value.lower() for kw in search_kws):
-                        has_search_input = True
+                if a.value and len(a.value) >= 10:  # 至少10个字符的内容
+                    has_type_action = True
+                    break
+
+            # 检查是否有提交/发布按钮的点击
+            for a in click_actions:
+                sel = (a.selector or "").lower()
+                val = (a.value or "").lower()
+                submit_keywords = [
+                    "submit", "发布", "发送", "post", "comment", "评论",
+                    "发表", "publish", "reply", "回复", "send", "确定",
+                    "btn-submit", "btn-comment", "btn-post",
+                ]
+                if any(kw in sel or kw in val for kw in submit_keywords):
+                    has_click_submit = True
+                    break
+
+            # 检查是否导航到了内容发布页面
+            if platform and platform in self.PLATFORM_CONFIG:
+                content_patterns = self.PLATFORM_CONFIG[platform].get("content_url_patterns", [])
+                for a in execution_log.actions:
+                    if a.type == ActionType.NAVIGATE and a.url:
+                        for pat in content_patterns:
+                            if re.search(pat, a.url):
+                                has_content_nav = True
+                                break
+                    if has_content_nav:
                         break
 
-            if has_search_input and click_actions:
-                score_breakdown["search_operation"] = 6
-                feedback_parts.append("✓ 搜索操作执行完整（输入+点击）")
-            elif has_search_input:
-                score_breakdown["search_operation"] = 4
-                feedback_parts.append("△ 有搜索输入但未检测到点击提交")
-            elif type_actions:
-                score_breakdown["search_operation"] = 2
-                feedback_parts.append("△ 有输入操作但关键词不匹配")
-            else:
-                feedback_parts.append("✗ 未检测到搜索操作")
+        if has_type_action and has_click_submit:
+            score_breakdown["text_content"] = 15
+            feedback_parts.append("✓ 成功发布了文字内容（输入+提交）")
+        elif has_type_action and has_content_nav:
+            score_breakdown["text_content"] = 12
+            feedback_parts.append("△ 输入了内容并导航到发布页，但未检测到提交操作")
+        elif has_type_action:
+            score_breakdown["text_content"] = 8
+            feedback_parts.append("△ 有输入操作但未确认提交")
+        elif has_content_nav:
+            score_breakdown["text_content"] = 4
+            feedback_parts.append("△ 导航到了内容发布页但未输入内容")
         else:
-            feedback_parts.append("✗ 缺少搜索操作日志")
+            # 也检查 answer 中是否声明了发布内容
+            publish_keywords = [
+                "已发布", "发布成功", "已评论", "已回答", "已发送",
+                "posted", "published", "commented", "submitted",
+            ]
+            if any(kw.lower() in full_text_lower for kw in publish_keywords):
+                score_breakdown["text_content"] = 6
+                feedback_parts.append("△ 声明发布了内容但缺少操作日志佐证")
+            else:
+                feedback_parts.append("✗ 未检测到内容发布操作")
 
-        # 5. 验证码匹配（6分）
-        if self.challenge_code:
-            if self.challenge_code in answer_text:
-                score_breakdown["challenge_code"] = 6
-                feedback_parts.append("✓ 验证码正确")
-            else:
-                feedback_parts.append("✗ 答案中未包含正确的验证码")
+        # 4. 发布图文内容（10分，加分项）
+        has_image_upload = False
+        if execution_log and execution_log.actions:
+            for a in execution_log.actions:
+                # 检查是否有图片上传相关操作
+                sel = (a.selector or "").lower()
+                val = (a.value or "").lower()
+                if a.type == ActionType.CLICK:
+                    if any(kw in sel or kw in val for kw in [
+                        "upload", "image", "photo", "图片", "上传",
+                        "attach", "file", "media", "插入图片",
+                    ]):
+                        has_image_upload = True
+                        break
+                elif a.type == ActionType.TYPE:
+                    # file input
+                    if any(kw in sel for kw in ["file", "upload", "input[type=file]"]):
+                        has_image_upload = True
+                        break
+
+        # 检查 answer 中是否提到图片
+        has_image_mention = any(
+            kw.lower() in full_text_lower for kw in self.IMAGE_KEYWORDS
+        )
+
+        # 检查执行日志中是否有截图被当作内容上传
+        has_screenshots_used = False
+        if execution_log and len(execution_log.screenshots) > 1:
+            # 有多张截图，可能其中一张是用作内容的
+            has_screenshots_used = True
+
+        if has_image_upload:
+            score_breakdown["image_content"] = 10
+            feedback_parts.append("✓ 发布了图文内容（检测到图片上传操作）")
+        elif has_image_mention and has_screenshots_used:
+            score_breakdown["image_content"] = 7
+            feedback_parts.append("△ 提到了图片且有多张截图，可能发布了图文")
+        elif has_image_mention:
+            score_breakdown["image_content"] = 4
+            feedback_parts.append("△ 提到了图片但未检测到上传操作")
         else:
-            score_breakdown["challenge_code"] = 6
-            feedback_parts.append("✓ 验证码检查跳过（兼容模式）")
+            score_breakdown["image_content"] = 0
+            feedback_parts.append("— 未发布图文内容（纯文字，不扣分）")
+
+        # 5. 内容质量与验证码（5分）
+        # 检查内容中是否包含 challenge_code
+        has_challenge = False
+        if self.challenge_code and self.challenge_code in answer_text:
+            has_challenge = True
+
+        # 检查是否包含 Agent 标识
+        has_signature = self.AGENT_SIGNATURE in answer_text
+
+        # 检查内容长度
+        body_text = answer_text
+        for marker in [self.AGENT_SIGNATURE, "🤖", "Verify:", "Token:"]:
+            body_text = body_text.replace(marker, "")
+        content_length = len(body_text.strip())
+        has_substance = content_length >= 30
+
+        quality_score = 0
+        if has_challenge:
+            quality_score += 2
+        elif not self.challenge_code:
+            quality_score += 2  # 兼容模式
+        if has_signature:
+            quality_score += 1
+        if has_substance:
+            quality_score += 2
+        score_breakdown["content_quality"] = quality_score
+
+        if quality_score >= 4:
+            feedback_parts.append("✓ 内容质量良好")
+        elif quality_score >= 2:
+            feedback_parts.append("△ 内容有一定质量但缺少部分标识")
+        else:
+            feedback_parts.append("✗ 内容质量不足（缺少验证码/标识/实质内容）")
 
         # ---- 汇总得分 ----
         total_score = sum(score_breakdown.values())
-        all_passed = total_score >= self.max_score * 0.7  # 70% 以上算通过
+        all_passed = total_score >= self.max_score * 0.5  # 50% 以上算通过
 
         return ValidationResult(
             correct=all_passed,
@@ -1700,8 +1779,8 @@ class SocialPlatformLoginValidator(BrowserActionValidator):
             details={
                 "platform": platform,
                 "score_breakdown": score_breakdown,
-                "answer_content": answer_content[:100] if answer_content else None,
-                "collab_summary": collab_summary[:100] if collab_summary else None,
+                "has_text_content": has_type_action,
+                "has_image_content": has_image_upload or has_image_mention,
                 "challenge_code_provided": bool(self.challenge_code),
             }
         )
@@ -1711,11 +1790,706 @@ class SocialPlatformLoginValidator(BrowserActionValidator):
 
     def get_config(self) -> Dict[str, Any]:
         config = {
-            "type": "SocialPlatformLoginValidator",
+            "type": "SocialPlatformContentValidator",
             "max_score": self.max_score,
         }
         if self.challenge_code:
             config["challenge_code"] = self.challenge_code
         if self.exam_token:
             config["exam_token"] = self.exam_token
+        return config
+
+
+# ============================================
+# L3 电商购物人机协作验证器
+# ============================================
+
+class EcommerceShoppingValidator(BrowserActionValidator):
+    """
+    电商购物人机协作验证器 — L3 高阶核心题
+
+    完整流程：
+    1. 主人选择电商平台（淘宝/京东）→ Agent 不得自选
+    2. Agent 访问平台登录页 → 截图给主人 → 主人完成登录（control_handover）
+    3. 登录成功后，Agent 搜索 "iPhone 17 Pro" 并找到苹果旗舰店
+    4. 加入购物车
+    5. 进入购物车页面，提取前三个商品的名称和价格
+    6. 上报答案（JSON 格式），与苹果官网价格做比对
+
+    评判维度（总计 40 分）：
+    - 询问主人选择平台（5分）
+    - 平台登录协作（8分）：截图+转交+恢复
+    - 搜索商品（5分）：搜索 iPhone 17 Pro
+    - 加购物车操作（7分）：点击加入购物车
+    - 购物车数据提取（10分）：上报前三个商品的名称和价格
+    - 价格比对通过（5分）：iPhone 17 Pro 价格在官网价 ±500 范围内
+    """
+
+    # 官方参考价格配置（可通过配置文件更新）
+    OFFICIAL_PRICES = {
+        "iphone 17 pro": {
+            "base_price": 8999,
+            "tolerance": 500,  # ±500 范围
+            "source": "https://www.apple.com.cn/shop/buy-iphone/iphone-17-pro",
+        },
+    }
+
+    # 支持的电商平台配置
+    PLATFORM_CONFIG = {
+        "taobao": {
+            "url_pattern": r"(taobao\.com|tmall\.com|login\.taobao)",
+            "login_pattern": r"(login\.taobao|login\.tmall)",
+            "keywords": ["淘宝", "taobao", "天猫", "tmall"],
+            "name": "淘宝/天猫",
+        },
+        "jd": {
+            "url_pattern": r"jd\.com",
+            "login_pattern": r"(passport\.jd|login\.jd)",
+            "keywords": ["京东", "jd", "JD"],
+            "name": "京东",
+        },
+    }
+
+    # 主人选择相关
+    USER_CHOICE_PHRASES = [
+        "主人选", "用户选", "主人决定", "用户决定",
+        "主人告诉", "用户告诉", "主人指定", "用户指定",
+        "主人要求", "用户要求", "告诉我选", "让我用", "让我去",
+        "asked me", "told me", "user chose", "user selected",
+    ]
+    USER_SUBJECT_WORDS = ["主人", "用户", "人类", "human", "user", "owner"]
+    USER_CHOICE_WORDS = ["选", "决定", "指定", "要求", "chose", "selected", "picked", "decided"]
+
+    # 登录协作关键词
+    LOGIN_COLLAB_KEYWORDS = [
+        "请", "扫码", "扫描", "二维码", "验证码", "手机号", "登录",
+        "主人", "用户", "协助", "帮忙", "截图",
+        "please", "scan", "qr", "login", "assist", "screenshot",
+    ]
+
+    def __init__(self, max_score: int = 40,
+                 challenge_code: str = None,
+                 exam_token: str = None,
+                 official_prices: Dict[str, Any] = None):
+        super().__init__(max_score=max_score)
+        self.challenge_code = challenge_code
+        self.exam_token = exam_token
+        if official_prices:
+            self.OFFICIAL_PRICES = official_prices
+
+    async def validate(
+        self,
+        answer: Optional[str],
+        execution_log: Optional[ExecutionLog]
+    ) -> ValidationResult:
+
+        if not answer or not answer.strip():
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback="未提交答案。请提交 JSON 格式的购物车商品数据。",
+            )
+
+        answer_text = answer.strip()
+
+        # ---- 计算各维度得分 ----
+        score_breakdown = {
+            "user_choice": 0,         # 5分：询问主人选择平台
+            "login_collab": 0,        # 8分：登录协作
+            "search_product": 0,      # 5分：搜索商品
+            "add_to_cart": 0,         # 7分：加购物车
+            "cart_data": 0,           # 10分：购物车数据提取
+            "price_check": 0,         # 5分：价格比对
+        }
+        feedback_parts = []
+
+        # ---- 推断平台 ----
+        platform = None
+        if execution_log and execution_log.actions:
+            for p_name, p_cfg in self.PLATFORM_CONFIG.items():
+                for action in execution_log.actions:
+                    if action.type == ActionType.NAVIGATE and action.url:
+                        if re.search(p_cfg["url_pattern"], action.url):
+                            platform = p_name
+                            break
+                if platform:
+                    break
+
+        if not platform:
+            answer_lower = answer_text.lower()
+            for p_name, p_cfg in self.PLATFORM_CONFIG.items():
+                for kw in p_cfg["keywords"]:
+                    if kw.lower() in answer_lower:
+                        platform = p_name
+                        break
+                if platform:
+                    break
+
+        # 1. 询问主人选择平台（5分）
+        full_text_lower = answer_text.lower()
+        phrase_matched = any(
+            phrase.lower() in full_text_lower
+            for phrase in self.USER_CHOICE_PHRASES
+        )
+        has_subject = any(w.lower() in full_text_lower for w in self.USER_SUBJECT_WORDS)
+        has_choice = any(w.lower() in full_text_lower for w in self.USER_CHOICE_WORDS)
+        combo_matched = has_subject and has_choice
+
+        if phrase_matched or combo_matched:
+            score_breakdown["user_choice"] = 5
+            feedback_parts.append("✓ 体现了主人的平台选择意愿")
+        elif platform:
+            score_breakdown["user_choice"] = 2
+            feedback_parts.append("△ 有平台但未体现是主人做的决定")
+        else:
+            feedback_parts.append("✗ 未体现平台选择")
+
+        # 2. 登录协作（8分）
+        has_screenshot = False
+        has_handover = False
+        has_resume = False
+        if execution_log and execution_log.actions:
+            for a in execution_log.actions:
+                if a.type == ActionType.SCREENSHOT:
+                    has_screenshot = True
+                elif a.type == ActionType.CONTROL_HANDOVER:
+                    has_handover = True
+                elif a.type == ActionType.CONTROL_RESUME:
+                    has_resume = True
+            if execution_log.screenshots:
+                has_screenshot = True
+
+        login_kw_matched = [
+            kw for kw in self.LOGIN_COLLAB_KEYWORDS
+            if kw.lower() in full_text_lower
+        ]
+
+        if has_handover and has_screenshot and has_resume:
+            score_breakdown["login_collab"] = 8
+            feedback_parts.append("✓ 登录协作完美（截图+转交+恢复）")
+        elif has_handover and has_screenshot:
+            score_breakdown["login_collab"] = 6
+            feedback_parts.append("△ 登录协作良好（截图+转交，缺少 resume）")
+        elif has_handover:
+            score_breakdown["login_collab"] = 4
+            feedback_parts.append("△ 转交了控制权但未截图给主人")
+        elif has_screenshot and login_kw_matched:
+            score_breakdown["login_collab"] = 4
+            feedback_parts.append("△ 截图并说明了登录，缺少 control_handover")
+        elif login_kw_matched and len(login_kw_matched) >= 2:
+            score_breakdown["login_collab"] = 2
+            feedback_parts.append("△ 文字中提及登录协作但缺少实际操作")
+        else:
+            feedback_parts.append("✗ 未体现登录协作")
+
+        # 3. 搜索商品（5分）
+        has_search = False
+        if execution_log and execution_log.actions:
+            type_actions = [a for a in execution_log.actions if a.type == ActionType.TYPE]
+            for a in type_actions:
+                if a.value:
+                    val_lower = a.value.lower()
+                    if "iphone" in val_lower and ("17" in val_lower or "pro" in val_lower):
+                        has_search = True
+                        break
+
+        if has_search:
+            score_breakdown["search_product"] = 5
+            feedback_parts.append("✓ 搜索了 iPhone 17 Pro")
+        elif execution_log and any(a.type == ActionType.TYPE for a in execution_log.actions):
+            score_breakdown["search_product"] = 2
+            feedback_parts.append("△ 有输入操作但未搜索 iPhone 17 Pro")
+        else:
+            feedback_parts.append("✗ 未检测到搜索操作")
+
+        # 4. 加购物车操作（7分）
+        has_cart_action = False
+        if execution_log and execution_log.actions:
+            click_actions = [a for a in execution_log.actions if a.type == ActionType.CLICK]
+            for a in click_actions:
+                # 检查 selector 或 value 中是否包含购物车相关词
+                sel = (a.selector or "").lower()
+                val = (a.value or "").lower()
+                if any(kw in sel or kw in val for kw in [
+                    "cart", "购物车", "加入购物车", "addcart", "add-to-cart",
+                    "加入", "加购", "j-addcart",
+                ]):
+                    has_cart_action = True
+                    break
+
+        # 也检查 answer 中是否提到了加购物车
+        if not has_cart_action and ("加入购物车" in answer_text or "加购" in answer_text
+                                     or "add to cart" in answer_text.lower()):
+            has_cart_action = True
+
+        if has_cart_action:
+            score_breakdown["add_to_cart"] = 7
+            feedback_parts.append("✓ 执行了加入购物车操作")
+        else:
+            feedback_parts.append("✗ 未检测到加入购物车操作")
+
+        # 5. 购物车数据提取（10分） + 6. 价格比对（5分）
+        cart_items = self._parse_cart_items(answer_text)
+
+        if cart_items and len(cart_items) >= 1:
+            # 有多少个有效商品数据
+            valid_items = [item for item in cart_items if item.get("name") and item.get("price") is not None]
+
+            if len(valid_items) >= 3:
+                score_breakdown["cart_data"] = 10
+                feedback_parts.append(f"✓ 成功提取 {len(valid_items)} 个购物车商品数据")
+            elif len(valid_items) >= 2:
+                score_breakdown["cart_data"] = 7
+                feedback_parts.append(f"△ 提取了 {len(valid_items)} 个商品数据（需要3个）")
+            elif len(valid_items) >= 1:
+                score_breakdown["cart_data"] = 4
+                feedback_parts.append(f"△ 仅提取了 {len(valid_items)} 个商品数据（需要3个）")
+            else:
+                feedback_parts.append("✗ 未提取到有效的商品数据")
+
+            # 价格比对：检查是否包含 iPhone 17 Pro 且价格在合理范围内
+            price_matched = False
+            for item in valid_items:
+                item_name = (item.get("name") or "").lower()
+                item_price = item.get("price", 0)
+
+                # 匹配 iPhone 17 Pro 的名称（宽松匹配）
+                if ("iphone" in item_name and "17" in item_name and "pro" in item_name):
+                    ref = self.OFFICIAL_PRICES.get("iphone 17 pro", {})
+                    base_price = ref.get("base_price", 8999)
+                    tolerance = ref.get("tolerance", 500)
+
+                    if isinstance(item_price, (int, float)) and abs(item_price - base_price) <= tolerance:
+                        price_matched = True
+                        score_breakdown["price_check"] = 5
+                        feedback_parts.append(
+                            f"✓ iPhone 17 Pro 价格 ¥{item_price} 在官网价 "
+                            f"¥{base_price}±{tolerance} 范围内"
+                        )
+                        break
+                    elif isinstance(item_price, (int, float)):
+                        score_breakdown["price_check"] = 2
+                        feedback_parts.append(
+                            f"△ iPhone 17 Pro 价格 ¥{item_price} 超出官网价 "
+                            f"¥{base_price}±{tolerance} 范围"
+                        )
+                        price_matched = True  # 已经处理过了
+                        break
+
+            if not price_matched:
+                # 没找到 iPhone 17 Pro 条目，尝试宽松匹配
+                for item in valid_items:
+                    item_name = (item.get("name") or "").lower()
+                    item_price = item.get("price", 0)
+                    if ("iphone" in item_name and "pro" in item_name) or \
+                       ("17 pro" in item_name) or ("17pro" in item_name):
+                        ref = self.OFFICIAL_PRICES.get("iphone 17 pro", {})
+                        base_price = ref.get("base_price", 8999)
+                        tolerance = ref.get("tolerance", 500)
+                        if isinstance(item_price, (int, float)) and abs(item_price - base_price) <= tolerance:
+                            score_breakdown["price_check"] = 5
+                            feedback_parts.append(
+                                f"✓ 商品 '{item.get('name')}' 价格 ¥{item_price} "
+                                f"在参考价 ¥{base_price}±{tolerance} 范围内"
+                            )
+                        elif isinstance(item_price, (int, float)):
+                            score_breakdown["price_check"] = 2
+                            feedback_parts.append(
+                                f"△ 商品 '{item.get('name')}' 价格 ¥{item_price} "
+                                f"超出参考价范围"
+                            )
+                        break
+                else:
+                    feedback_parts.append("✗ 未找到 iPhone 17 Pro 价格数据，无法比对")
+        else:
+            feedback_parts.append("✗ 未提取到购物车商品数据")
+            feedback_parts.append("✗ 无法进行价格比对")
+
+        # ---- 汇总得分 ----
+        total_score = sum(score_breakdown.values())
+        all_passed = total_score >= self.max_score * 0.6  # 60% 以上算通过
+
+        return ValidationResult(
+            correct=all_passed,
+            score=total_score,
+            max_score=self.max_score,
+            feedback=" | ".join(feedback_parts),
+            details={
+                "platform": platform,
+                "score_breakdown": score_breakdown,
+                "cart_items_parsed": len(cart_items) if cart_items else 0,
+                "official_prices": self.OFFICIAL_PRICES,
+                "challenge_code_provided": bool(self.challenge_code),
+            }
+        )
+
+    def _parse_cart_items(self, answer_text: str) -> List[Dict[str, Any]]:
+        """
+        从答案文本中解析购物车商品数据。
+
+        支持多种格式：
+        1. JSON 数组: [{"name": "...", "price": 8999}, ...]
+        2. JSON 对象中的 items/cart/products 字段
+        3. 文本格式: "1. 商品名 - ¥8999"
+        """
+        import json
+
+        items = []
+
+        # 尝试 JSON 解析
+        try:
+            data = json.loads(answer_text)
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                # 尝试常见的 key
+                for key in ["items", "cart", "products", "cart_items", "data"]:
+                    if key in data and isinstance(data[key], list):
+                        items = data[key]
+                        break
+                if not items and "name" in data:
+                    # 单个商品
+                    items = [data]
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # 如果 JSON 解析失败，尝试从文本中提取
+        if not items:
+            # 尝试提取 JSON 片段（answer 中可能包含其他文本包裹的 JSON）
+            json_pattern = r'\[[\s\S]*?\]'
+            json_matches = re.findall(json_pattern, answer_text)
+            for match in json_matches:
+                try:
+                    parsed = json.loads(match)
+                    if isinstance(parsed, list) and len(parsed) > 0:
+                        items = parsed
+                        break
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+        if not items:
+            # 尝试提取 JSON 对象片段
+            json_obj_pattern = r'\{[\s\S]*?\}'
+            json_obj_matches = re.findall(json_obj_pattern, answer_text)
+            for match in json_obj_matches:
+                try:
+                    parsed = json.loads(match)
+                    if isinstance(parsed, dict) and ("name" in parsed or "price" in parsed):
+                        items.append(parsed)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+        # 如果还没有，尝试文本行解析
+        if not items:
+            lines = answer_text.split("\n")
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                # 匹配 "商品名 ¥8999" 或 "商品名 8999元" 等
+                price_match = re.search(r'[¥￥]?\s*(\d[\d,]*\.?\d*)\s*[元]?', line)
+                if price_match:
+                    price_str = price_match.group(1).replace(",", "")
+                    try:
+                        price = float(price_str)
+                    except ValueError:
+                        continue
+                    # 提取商品名（价格前面的部分）
+                    name_part = line[:price_match.start()].strip()
+                    # 清理序号前缀
+                    name_part = re.sub(r'^[\d]+[\.\)、]\s*', '', name_part)
+                    if name_part and price > 0:
+                        items.append({"name": name_part, "price": price})
+
+        # 标准化：确保每个 item 都有 name 和 price
+        normalized = []
+        for item in items:
+            if isinstance(item, dict):
+                name = item.get("name", item.get("product_name", item.get("title", "")))
+                price = item.get("price", item.get("product_price", item.get("amount", 0)))
+                if isinstance(price, str):
+                    price = re.sub(r'[¥￥元,\s]', '', price)
+                    try:
+                        price = float(price)
+                    except ValueError:
+                        price = 0
+                normalized.append({"name": str(name), "price": price})
+
+        return normalized
+
+    def get_score(self) -> Tuple[int, int]:
+        return (self.max_score, self.max_score)
+
+    def get_config(self) -> Dict[str, Any]:
+        config = {
+            "type": "EcommerceShoppingValidator",
+            "max_score": self.max_score,
+        }
+        if self.challenge_code:
+            config["challenge_code"] = self.challenge_code
+        if self.exam_token:
+            config["exam_token"] = self.exam_token
+        return config
+
+
+# ============================================
+# 保留旧验证器（向后兼容）
+# ============================================
+
+class EcommerceBetterDealValidator(BrowserActionValidator):
+    """
+    电商比价验证器 — L3-3 题目
+
+    在 L3-2 加购了 iPhone 17 Pro 之后，让 Agent 去找同平台**其他商铺**
+    价格更低的同款商品，并提交该商品的价格、销量、评论数。
+
+    评判维度（总计 15 分）：
+    - 找到更便宜的商铺商品（5分）：价格低于苹果旗舰店
+    - 提交完整数据（5分）：包含价格+销量+评论数
+    - 数据合理性（5分）：价格不低得离谱，销量和评论数为正数
+    """
+
+    # iPhone 17 Pro 参考价格
+    REFERENCE_PRICE = 8999
+    # 合理的最低价（低于此视为假数据/山寨）
+    MIN_REASONABLE_PRICE = 5000
+    # 最高价（不能比官方还贵才叫更便宜）
+    MAX_PRICE = 8998
+
+    def __init__(self, max_score: int = 15,
+                 challenge_code: str = None,
+                 exam_token: str = None):
+        super().__init__(max_score=max_score)
+        self.challenge_code = challenge_code
+        self.exam_token = exam_token
+
+    async def validate(
+        self,
+        answer: Optional[str],
+        execution_log: Optional[ExecutionLog]
+    ) -> ValidationResult:
+
+        if not answer or not answer.strip():
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback="未提交答案。请提交更便宜商铺的商品数据（JSON 格式）。",
+            )
+
+        answer_text = answer.strip()
+
+        score_breakdown = {
+            "cheaper_found": 0,       # 5分：找到更便宜的商铺
+            "data_complete": 0,       # 5分：提交完整数据
+            "data_reasonable": 0,     # 5分：数据合理性
+        }
+        feedback_parts = []
+
+        # 解析提交的数据
+        import json
+        deal_data = None
+
+        # 尝试 JSON 解析
+        try:
+            data = json.loads(answer_text)
+            if isinstance(data, dict):
+                deal_data = data
+            elif isinstance(data, list) and len(data) > 0:
+                deal_data = data[0]
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # 如果 JSON 失败，尝试从文本中提取 JSON 对象
+        if not deal_data:
+            json_obj_pattern = r'\{[\s\S]*?\}'
+            json_obj_matches = re.findall(json_obj_pattern, answer_text)
+            for match in json_obj_matches:
+                try:
+                    parsed = json.loads(match)
+                    if isinstance(parsed, dict) and ("price" in parsed or "shop" in parsed
+                                                      or "价格" in parsed or "商铺" in parsed):
+                        deal_data = parsed
+                        break
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+        if not deal_data:
+            return ValidationResult(
+                correct=False,
+                score=0,
+                max_score=self.max_score,
+                feedback="无法解析答案数据，请提交 JSON 格式的商品数据",
+                details={"raw_answer": answer_text[:200]}
+            )
+
+        # 提取关键字段
+        price = deal_data.get("price", deal_data.get("价格", None))
+        sales = deal_data.get("sales", deal_data.get("销量",
+               deal_data.get("sold", deal_data.get("monthly_sales", None))))
+        reviews = deal_data.get("reviews", deal_data.get("评论数",
+                 deal_data.get("comments", deal_data.get("review_count", None))))
+        shop_name = deal_data.get("shop", deal_data.get("shop_name",
+                   deal_data.get("商铺", deal_data.get("店铺", ""))))
+        product_name = deal_data.get("name", deal_data.get("product_name",
+                      deal_data.get("商品名称", deal_data.get("title", ""))))
+
+        # 清理价格
+        if isinstance(price, str):
+            price = re.sub(r'[¥￥元,\s]', '', price)
+            try:
+                price = float(price)
+            except ValueError:
+                price = None
+
+        # 清理销量
+        if isinstance(sales, str):
+            sales = re.sub(r'[+\s万件个条]', '', sales)
+            try:
+                if '万' in str(deal_data.get("sales", "")):
+                    sales = float(sales) * 10000
+                else:
+                    sales = float(sales)
+            except ValueError:
+                sales = None
+
+        # 清理评论数
+        if isinstance(reviews, str):
+            reviews = re.sub(r'[+\s万条个]', '', reviews)
+            try:
+                if '万' in str(deal_data.get("reviews", "")):
+                    reviews = float(reviews) * 10000
+                else:
+                    reviews = float(reviews)
+            except ValueError:
+                reviews = None
+
+        # 1. 找到更便宜的商铺（5分）
+        if price is not None and isinstance(price, (int, float)):
+            if price < self.REFERENCE_PRICE:
+                score_breakdown["cheaper_found"] = 5
+                feedback_parts.append(
+                    f"✓ 找到更便宜的商品 ¥{price}（低于旗舰店 ¥{self.REFERENCE_PRICE}）"
+                )
+            elif price == self.REFERENCE_PRICE:
+                score_breakdown["cheaper_found"] = 2
+                feedback_parts.append(
+                    f"△ 价格 ¥{price} 与旗舰店相同，未找到更便宜的"
+                )
+            else:
+                score_breakdown["cheaper_found"] = 0
+                feedback_parts.append(
+                    f"✗ 价格 ¥{price} 比旗舰店 ¥{self.REFERENCE_PRICE} 更贵"
+                )
+        else:
+            feedback_parts.append("✗ 未提供有效的价格数据")
+
+        # 2. 提交完整数据（5分）
+        has_price = price is not None and isinstance(price, (int, float))
+        has_sales = sales is not None and isinstance(sales, (int, float))
+        has_reviews = reviews is not None and isinstance(reviews, (int, float))
+
+        complete_count = sum([has_price, has_sales, has_reviews])
+        if complete_count == 3:
+            score_breakdown["data_complete"] = 5
+            feedback_parts.append(f"✓ 数据完整（价格+销量+评论数）")
+        elif complete_count == 2:
+            score_breakdown["data_complete"] = 3
+            missing = []
+            if not has_price:
+                missing.append("价格")
+            if not has_sales:
+                missing.append("销量")
+            if not has_reviews:
+                missing.append("评论数")
+            feedback_parts.append(f"△ 缺少{'/'.join(missing)}数据")
+        elif complete_count == 1:
+            score_breakdown["data_complete"] = 1
+            feedback_parts.append("△ 数据严重不完整")
+        else:
+            feedback_parts.append("✗ 未提交有效数据")
+
+        # 3. 数据合理性（5分）
+        reasonable = True
+        reason_parts = []
+
+        if has_price:
+            if price < self.MIN_REASONABLE_PRICE:
+                reasonable = False
+                reason_parts.append(f"价格 ¥{price} 低得不合理（<¥{self.MIN_REASONABLE_PRICE}）")
+            elif price > self.REFERENCE_PRICE:
+                reasonable = False
+                reason_parts.append(f"价格未比旗舰店便宜")
+
+        if has_sales:
+            if sales <= 0:
+                reasonable = False
+                reason_parts.append("销量不能为0或负数")
+
+        if has_reviews:
+            if reviews < 0:
+                reasonable = False
+                reason_parts.append("评论数不能为负数")
+
+        if reasonable and complete_count >= 2:
+            score_breakdown["data_reasonable"] = 5
+            feedback_parts.append("✓ 数据合理")
+        elif len(reason_parts) <= 1 and complete_count >= 2:
+            score_breakdown["data_reasonable"] = 3
+            feedback_parts.append(f"△ 部分数据不合理: {'; '.join(reason_parts)}")
+        elif reason_parts:
+            score_breakdown["data_reasonable"] = 0
+            feedback_parts.append(f"✗ 数据不合理: {'; '.join(reason_parts)}")
+
+        # 汇总
+        total_score = sum(score_breakdown.values())
+        all_passed = total_score >= self.max_score * 0.6
+
+        return ValidationResult(
+            correct=all_passed,
+            score=total_score,
+            max_score=self.max_score,
+            feedback=" | ".join(feedback_parts),
+            details={
+                "score_breakdown": score_breakdown,
+                "parsed_data": {
+                    "price": price,
+                    "sales": sales,
+                    "reviews": reviews,
+                    "shop_name": shop_name,
+                    "product_name": product_name,
+                },
+                "reference_price": self.REFERENCE_PRICE,
+            }
+        )
+
+    def get_score(self) -> Tuple[int, int]:
+        return (self.max_score, self.max_score)
+
+    def get_config(self) -> Dict[str, Any]:
+        config = {
+            "type": "EcommerceBetterDealValidator",
+            "max_score": self.max_score,
+        }
+        if self.challenge_code:
+            config["challenge_code"] = self.challenge_code
+        if self.exam_token:
+            config["exam_token"] = self.exam_token
+        return config
+
+
+class SocialPlatformLoginValidator(EcommerceShoppingValidator):
+    """向后兼容：旧的社交平台验证器 → 转发到电商购物验证器"""
+
+    def __init__(self, max_score: int = 40, challenge_code: str = None, exam_token: str = None):
+        super().__init__(
+            max_score=max_score,
+            challenge_code=challenge_code,
+            exam_token=exam_token,
+        )
+
+    def get_config(self) -> Dict[str, Any]:
+        config = super().get_config()
+        config["type"] = "EcommerceShoppingValidator"
         return config

@@ -31,6 +31,7 @@ from .validators import (
     OnDemandSnapshotValidator, ControlHandoverValidator,
     SearchValidator, MultiStepValidator, BuiltInPageValidator,
     GitHubStarValidator, SocialPlatformLoginValidator,
+    EcommerceShoppingValidator, SocialPlatformContentValidator,
 )
 from .security import (
     security_manager, get_client_ip, verify_request,
@@ -89,6 +90,19 @@ def create_validator(validator_config: Dict) -> Optional[Any]:
     elif validator_type == "SocialPlatformLoginValidator":
         return SocialPlatformLoginValidator(
             max_score=validator_config.get("max_score", 30),
+            challenge_code=validator_config.get("challenge_code"),
+            exam_token=validator_config.get("exam_token"),
+        )
+    elif validator_type == "EcommerceShoppingValidator":
+        return EcommerceShoppingValidator(
+            max_score=validator_config.get("max_score", 40),
+            challenge_code=validator_config.get("challenge_code"),
+            exam_token=validator_config.get("exam_token"),
+            official_prices=validator_config.get("official_prices"),
+        )
+    elif validator_type == "SocialPlatformContentValidator":
+        return SocialPlatformContentValidator(
+            max_score=validator_config.get("max_score", 45),
             challenge_code=validator_config.get("challenge_code"),
             exam_token=validator_config.get("exam_token"),
         )
@@ -638,11 +652,12 @@ async def register(request: Request, data: RegisterRequest):
     # 获取题目
     tasks = get_tasks_for_level(data.exam_id)
 
-    # 为 L3-4（社交平台登录与互动）注入 challenge_code
+    # 为需要 challenge_code 的题目注入验证码
     challenge_code = None
     for task in tasks:
-        if task.get("id") == "L3-4":
-            challenge_code = secrets.token_hex(4).upper()  # 8字符大写十六进制
+        if task.get("id") in ("L3-1",):
+            if not challenge_code:
+                challenge_code = secrets.token_hex(4).upper()  # 8字符大写十六进制
             # 将 challenge_code 嵌入 instructions
             task["instructions"] = (
                 f"【你的专属验证码】Verify: {challenge_code}\n\n"
@@ -651,7 +666,6 @@ async def register(request: Request, data: RegisterRequest):
             # 将 challenge_code 写入 validator_config，供验证器使用
             if task.get("validator_config"):
                 task["validator_config"]["challenge_code"] = challenge_code
-            break
 
     # 从集中配置读取超时时间
     timeout_minutes = get_timeout_minutes(data.exam_id)
