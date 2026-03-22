@@ -498,6 +498,10 @@ async def register(request: Request, data: RegisterRequest):
                 task["validator_config"]["challenge_code"] = challenge_code
             break
 
+    # 按级别设置差异化超时时间
+    EXAM_TIMEOUT = {"v1": 10, "v2": 20, "v3": 30}
+    timeout_minutes = EXAM_TIMEOUT.get(data.exam_id, 30)
+
     # 创建会话
     session = ExamSession(
         exam_token=exam_token,
@@ -509,7 +513,8 @@ async def register(request: Request, data: RegisterRequest):
         exam_id=ExamLevel(data.exam_id),
         started_at=datetime.now(),
         tasks=tasks,
-        current_task_index=0
+        current_task_index=0,
+        timeout_minutes=timeout_minutes,
     )
 
     _get_db().save_session(session)
@@ -520,7 +525,7 @@ async def register(request: Request, data: RegisterRequest):
         "total_score": sum(t["max_score"] for t in tasks),
         "first_question": tasks[0] if tasks else None,
         "exam_id": data.exam_id,
-        "expires_in_minutes": 30
+        "expires_in_minutes": timeout_minutes
     }
 
 
